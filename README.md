@@ -7,6 +7,9 @@ This project aims to make a 2D engine with **purely** procedurally generated con
 - Breakout
     - Increase complexity of brick and ball texture as project evolves, "bricked wall" background
     - Add brick explosions
+
+![Breakout](screenshots/breakout.png)
+
 - A simple tower defense
     - TD wars
     - Showcase different buildings and projectiles as project evolves
