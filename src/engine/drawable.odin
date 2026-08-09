@@ -23,6 +23,7 @@ RectShape :: struct {
 	line_color: Color,
 	thickness:  f32,
 	fill:       RectFill,
+	fbm:        Maybe(FbmParams),
 }
 
 CircleShape :: struct {
@@ -30,6 +31,7 @@ CircleShape :: struct {
 	line_color: Color,
 	thickness:  f32,
 	fill:       RectFill,
+	fbm:        Maybe(FbmParams),
 }
 
 Drawable :: union {

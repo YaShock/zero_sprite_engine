@@ -127,24 +127,49 @@ render_objects :: proc(delta_time: f32) {
 					d.color,
 				)
 			case RectShape:
-				switch d.fill {
-				case .Fill:
-					rl.DrawRectanglePro(dst, {0, 0}, obj.rotation, d.fill_color)
-				case .Outline:
-					rl.DrawRectangleLinesEx(dst, d.thickness, d.line_color)
-				case .FillOutline:
-					rl.DrawRectanglePro(dst, {0, 0}, obj.rotation, d.fill_color)
-					rl.DrawRectangleLinesEx(dst, d.thickness, d.line_color)
+				if fbm_p, ok := d.fbm.?; ok {
+					switch d.fill {
+					case .Fill:
+						draw_fbm_rect(dst, fbm_p)
+					case .Outline:
+						rl.DrawRectangleLinesEx(dst, d.thickness, d.line_color)
+					case .FillOutline:
+						draw_fbm_rect(dst, fbm_p)
+						rl.DrawRectangleLinesEx(dst, d.thickness, d.line_color)
+					}
+				} else {
+					switch d.fill {
+					case .Fill:
+						rl.DrawRectanglePro(dst, {0, 0}, obj.rotation, d.fill_color)
+					case .Outline:
+						rl.DrawRectangleLinesEx(dst, d.thickness, d.line_color)
+					case .FillOutline:
+						rl.DrawRectanglePro(dst, {0, 0}, obj.rotation, d.fill_color)
+						rl.DrawRectangleLinesEx(dst, d.thickness, d.line_color)
+					}
 				}
 			case CircleShape:
-				switch d.fill {
-				case .Fill:
-					rl.DrawCircle(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.fill_color)
-				case .Outline:
-					rl.DrawCircleLines(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.line_color)
-				case .FillOutline:
-					rl.DrawCircle(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.fill_color)
-					rl.DrawCircleLines(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.line_color)
+				center := rl.Vector2{obj.pos.x, obj.pos.y}
+				if fbm_p, ok := d.fbm.?; ok {
+					switch d.fill {
+					case .Fill:
+						draw_fbm_circle(center, obj.size.x, fbm_p)
+					case .Outline:
+						rl.DrawCircleLines(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.line_color)
+					case .FillOutline:
+						draw_fbm_circle(center, obj.size.x, fbm_p)
+						rl.DrawCircleLines(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.line_color)
+					}
+				} else {
+					switch d.fill {
+					case .Fill:
+						rl.DrawCircle(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.fill_color)
+					case .Outline:
+						rl.DrawCircleLines(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.line_color)
+					case .FillOutline:
+						rl.DrawCircle(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.fill_color)
+						rl.DrawCircleLines(i32(obj.pos.x), i32(obj.pos.y), obj.size.x, d.line_color)
+					}
 				}
 			}
 		}

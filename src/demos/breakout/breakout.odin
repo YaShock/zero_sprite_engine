@@ -14,6 +14,20 @@ BALL_RADIUS :: 8
 BRICK_ROWS :: 4
 BRICK_COLS :: 15
 
+// fBm color pairs per row: [dark, light]
+BRICK_ROW_COLORS := [BRICK_ROWS][2]rl.Color {
+	{{90, 90, 95, 255}, {200, 200, 210, 255}}, // stone gray
+	{{130, 100, 65, 255}, {215, 185, 135, 255}}, // warm sandstone
+	{{65, 95, 70, 255}, {135, 175, 125, 255}}, // mossy green
+	{{120, 55, 45, 255}, {205, 115, 95, 255}}, // rusty red
+}
+BRICK_OUTLINE_COLORS := [BRICK_ROWS]rl.Color {
+	{40, 40, 45, 255},
+	{80, 55, 30, 255},
+	{35, 55, 40, 255},
+	{70, 25, 20, 255},
+}
+
 MARGIN :: 10
 
 MOVESPEED :: 300
@@ -35,6 +49,7 @@ GameState :: enum {
 	Playing,
 	Won,
 	Lost,
+	Pause,
 }
 
 Game :: struct {
@@ -66,10 +81,20 @@ create_level := proc() {
 				{f32(brick_width), BRICK_HEIGHT},
 				.FillOutline,
 				rl.BROWN,
-				rl.RED,
+				BRICK_OUTLINE_COLORS[i],
 				1,
 				1,
 			)
+			eng.get_drawable(brick_id, eng.RectShape).fbm = eng.FbmParams {
+				octaves    = 4,
+				frequency  = 0.07,
+				lacunarity = 2.0,
+				gain       = 0.5,
+				color_a    = BRICK_ROW_COLORS[i][0],
+				color_b    = BRICK_ROW_COLORS[i][1],
+				cell_size  = 2,
+				seed       = f32(i) * 17.3 + f32(j) * 3.1,
+			}
 			append(&game.brick_ids, brick_id)
 
 			brick_colliders[brick_id] = eng.make_rect_collider(
@@ -118,13 +143,13 @@ spawn_particles :: proc(pos, size: rl.Vector2, color: rl.Color) {
 			px := pos.x + f32(col) * cell_w + rand.float32_range(0, cell_w - pw)
 			py := pos.y + f32(row) * cell_h + rand.float32_range(0, cell_h - ph)
 
-			cell_center := rl.Vector2{
+			cell_center := rl.Vector2 {
 				pos.x + (f32(col) + 0.5) * cell_w,
 				pos.y + (f32(row) + 0.5) * cell_h,
 			}
 			dir := rl.Vector2Normalize(cell_center - brick_center)
 			speed := rand.float32_range(80, 220)
-			vel := rl.Vector2{
+			vel := rl.Vector2 {
 				dir.x * speed + rand.float32_range(-25, 25),
 				dir.y * speed + rand.float32_range(-25, 25),
 			}
@@ -133,11 +158,11 @@ spawn_particles :: proc(pos, size: rl.Vector2, color: rl.Color) {
 			id := eng.add_rect_shape({px, py}, {pw, ph}, .Fill, color, rl.BLACK, 1, 1)
 			append(
 				&particles,
-				Particle{
-					id           = id,
-					vel          = vel,
-					rot_vel      = rand.float32_range(-240, 240),
-					lifetime     = lifetime,
+				Particle {
+					id = id,
+					vel = vel,
+					rot_vel = rand.float32_range(-240, 240),
+					lifetime = lifetime,
 					max_lifetime = lifetime,
 				},
 			)
@@ -218,7 +243,13 @@ check_collision := proc(player_obj, ball_obj: ^eng.RenderObject, delta_time: f32
 	}
 	if to_remove_id != -1 {
 		brick_obj := eng.get_render_object(to_remove_id)
-		brick_color := eng.get_drawable(to_remove_id, eng.RectShape).fill_color
+		d := eng.get_drawable(to_remove_id, eng.RectShape)
+		brick_color: rl.Color
+		if fbm_p, ok := d.fbm.?; ok {
+			brick_color = eng.lerp_color(fbm_p.color_a, fbm_p.color_b, 0.6)
+		} else {
+			brick_color = d.fill_color
+		}
 		spawn_particles(brick_obj.pos, brick_obj.size, brick_color)
 		eng.remove_scene_object(to_remove_id)
 		unordered_remove(&game.brick_ids, to_remove_idx)
@@ -226,7 +257,16 @@ check_collision := proc(player_obj, ball_obj: ^eng.RenderObject, delta_time: f32
 }
 
 on_update := proc(delta_time: f32) {
-	if game.game_state == .Won || game.game_state == .Lost {
+	if rl.IsKeyPressed(.SPACE) {
+		if game.game_state == .Playing {
+			game.game_state = .Pause
+		}
+		else if game.game_state == .Pause {
+			game.game_state = .Playing
+		}
+	}
+
+	if game.game_state != .Playing {
 		return
 	}
 
