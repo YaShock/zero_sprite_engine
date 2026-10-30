@@ -18,6 +18,7 @@ This project aims to make a 2D engine with **purely** procedurally generated con
     - Bird generation
 - Space fighting game
     - Spaceship and space + planet generation
+    - Galcon fusion clone
 - Large game project
     - TD wars with logistics, "heroes", minions
     - Robotic synthwave style
