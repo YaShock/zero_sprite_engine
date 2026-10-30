@@ -1,6 +1,7 @@
 package engine
 
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import rl "vendor:raylib"
 import "vfx"
@@ -47,6 +48,7 @@ Entity :: struct {
 @(private)
 Layer :: struct {
 	entity_ids: [dynamic]int,
+	y_sorted:   bool,
 }
 
 @(private)
@@ -62,6 +64,12 @@ scene: Scene
 @(private)
 init_scene :: proc(num_layers: int) {
 	scene.layers = make([dynamic]Layer, max(num_layers, 1))
+}
+
+// Draws the layer's entities ordered by the bottom edge of their logical size, so that in
+// top-down / three-quarter views whatever stands further down the screen is in front.
+set_layer_y_sorted :: proc(z_index: int, y_sorted: bool) {
+	scene.layers[z_index].y_sorted = y_sorted
 }
 
 SpawnOptions :: struct {
@@ -99,6 +107,10 @@ set_text :: proc(id: int, text: string) {
 		delete(t.text)
 		t.text = strings.clone(text)
 	}
+}
+
+set_text_color :: proc(id: int, color: Color) {
+	(&get_entity(id).drawable.(Text)).color = color
 }
 
 @(private)
@@ -180,7 +192,15 @@ remove_expired_entities :: proc() {
 @(private)
 render_entities :: proc() {
 	for layer in scene.layers {
-		for id in layer.entity_ids {
+		ids := layer.entity_ids[:]
+		if layer.y_sorted {
+			ids = slice.clone(ids, context.temp_allocator)
+			slice.sort_by(ids, proc(a, b: int) -> bool {
+				ea, eb := &scene.entities[a], &scene.entities[b]
+				return ea.pos.y + ea.size.y / 2 < eb.pos.y + eb.size.y / 2
+			})
+		}
+		for id in ids {
 			e := &scene.entities[id]
 			if !e.visible {
 				continue

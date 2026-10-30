@@ -182,7 +182,7 @@ draw_material :: proc(e: ^Entity, m: ^Material) {
 	rl.SetShaderValue(sh, entry.loc_extent, &extent, .VEC2)
 	rl.SetShaderValue(sh, entry.loc_origin, &e.pos, .VEC2)
 	if len(m.params) > 0 {
-		rl.SetShaderValueV(sh, entry.loc_params, &m.params[0], .FLOAT, i32(len(m.params)))
+		rl.SetShaderValueV(sh, entry.loc_params, &m.params[0], .VEC4, i32(len(m.params) / 4))
 	}
 
 	// The default 1x1 white texture just carries texture coordinates across the quad.

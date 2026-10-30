@@ -14,7 +14,7 @@ uniform float u_rot;    // object rotation, radians
 uniform vec2 u_size;    // logical object size
 uniform vec2 u_extent;  // drawn quad size (size + padding)
 uniform vec2 u_origin;  // object center in world space
-uniform float u_p[%d];  // per-object parameter slots
+uniform vec4 u_p[%d];   // per-object parameter slots, packed by 4
 `
 
 @(private)
@@ -22,6 +22,10 @@ PRELUDE :: `
 vec2 rot2(vec2 v, float a) {
 	float c = cos(a), s = sin(a);
 	return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
+}
+
+float angle2(vec2 v) {
+	return atan(v.y, v.x);
 }
 
 float hash11(float p) {

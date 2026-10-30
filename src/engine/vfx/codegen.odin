@@ -14,7 +14,7 @@ ParamSlot :: struct {
 // with the same structure (and parameter names) produce identical sources.
 Program :: struct {
 	source:   string,
-	defaults: []f32, // initial value of every uniform slot
+	defaults: []f32, // initial value of every uniform slot, padded to a multiple of 4
 	params:   []ParamSlot, // named slots, settable at runtime
 }
 
@@ -50,7 +50,12 @@ compile :: proc(root: Expr, allocator := context.allocator) -> Program {
 	root_id := emit(&g, r)
 
 	sb := strings.builder_make()
-	fmt.sbprintf(&sb, FRAGMENT_HEADER, builtin.max(len(g.values), 1))
+	// Slots are packed into vec4s: drivers may pad every element of a float array to a full
+	// vec4 register, which would quarter the number of parameters a look can have.
+	for len(g.values) % 4 != 0 {
+		append(&g.values, 0)
+	}
+	fmt.sbprintf(&sb, FRAGMENT_HEADER, builtin.max(len(g.values) / 4, 1))
 	for s in g.named {
 		fmt.sbprintf(&sb, "// param %s @ %d\n", s.name, s.offset)
 	}
@@ -96,13 +101,17 @@ delete_program :: proc(prog: Program, allocator := context.allocator) {
 
 @(private)
 slot_expr :: proc(offset: int, type: Type) -> string {
+	slot :: proc(i: int) -> string {
+		components := "xyzw"
+		return fmt.tprintf("u_p[%d].%c", i / 4, components[i % 4])
+	}
 	switch type {
 	case .Float:
-		return fmt.tprintf("u_p[%d]", offset)
+		return slot(offset)
 	case .Vec2:
-		return fmt.tprintf("vec2(u_p[%d], u_p[%d])", offset, offset + 1)
+		return fmt.tprintf("vec2(%s, %s)", slot(offset), slot(offset + 1))
 	case .Vec4:
-		return fmt.tprintf("vec4(u_p[%d], u_p[%d], u_p[%d], u_p[%d])", offset, offset + 1, offset + 2, offset + 3)
+		return fmt.tprintf("vec4(%s, %s, %s, %s)", slot(offset), slot(offset + 1), slot(offset + 2), slot(offset + 3))
 	}
 	unreachable()
 }
@@ -213,6 +222,8 @@ emit :: proc(g: ^Gen, n: ^Node) -> int {
 		body = fmt.tprintf("fract(%s)", a(c, 0))
 	case .Length:
 		body = fmt.tprintf("length(%s)", a(c, 0))
+	case .Angle:
+		body = fmt.tprintf("angle2(%s)", a(c, 0))
 	case .Dot:
 		body = fmt.tprintf("dot(%s, %s)", a(c, 0), a(c, 1))
 	case .Swizzle:

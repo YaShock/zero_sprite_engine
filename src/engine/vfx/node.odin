@@ -51,6 +51,7 @@ Op :: enum u8 {
 	Fract,
 	Length,
 	Dot,
+	Angle,
 	Swizzle,
 	MakeVec2,
 	MakeRgba,
@@ -245,6 +246,8 @@ floor :: proc(a: Expr) -> ^Node {return unary(.Floor, a)}
 fract :: proc(a: Expr) -> ^Node {return unary(.Fract, a)}
 length :: proc(a: Expr) -> ^Node {return new_node(.Length, .Float, a)}
 dot :: proc(a, b: Expr) -> ^Node {return new_node(.Dot, .Float, a, b)}
+// Polar angle of a vector in radians, in [-π, π] (0 = right, π/2 = down).
+angle :: proc(v: Expr) -> ^Node {return new_node(.Angle, .Float, v)}
 
 // GLSL-style component selection: swizzle(v, "y"), swizzle(c, "a"), swizzle(v, "yx").
 swizzle :: proc(v: Expr, mask: string) -> ^Node {
@@ -303,6 +306,16 @@ voronoi_edge :: proc(p: Expr) -> ^Node {return new_node(.VoronoiEdge, .Float, p)
 sd_box :: proc(p, half_size: Expr, radius: Expr = f32(0)) -> ^Node {return new_node(.SdBox, .Float, p, half_size, radius)}
 sd_circle :: proc(p, radius: Expr) -> ^Node {return new_node(.SdCircle, .Float, p, radius)}
 sd_segment :: proc(p, a, b: Expr) -> ^Node {return new_node(.SdSegment, .Float, p, a, b)}
+// Distance to an open polyline: the union of its segments.
+sd_polyline :: proc(p: Expr, points: [][2]f32) -> ^Node {
+	assert(len(points) >= 2)
+	pn := to_node(p)
+	d := sd_segment(pn, points[0], points[1])
+	for i in 1 ..< len(points) - 1 {
+		d = min(d, sd_segment(pn, points[i], points[i + 1]))
+	}
+	return d
+}
 // Anti-aliased coverage of the inside of a distance field.
 fill :: proc(d: Expr) -> ^Node {return new_node(.Fill, .Float, d)}
 // Anti-aliased coverage of a band of `width` around the zero contour.
@@ -316,6 +329,16 @@ glow :: proc(d, radius: Expr) -> ^Node {return new_node(.Glow, .Float, d, radius
 // Cosine palette: a + b * cos(2π(c·t + d)), see iquilezles.org/articles/palettes.
 palette :: proc(t, a, b, c, d: Expr) -> ^Node {return new_node(.Palette, .Vec4, t, a, b, c, d)}
 gradient :: proc(t, from, to: Expr) -> ^Node {return mix(from, to, t)}
+// Piecewise-linear gradient through evenly spaced stops as `t` goes from 0 to 1.
+ramp :: proc(t: Expr, stops: ..Expr) -> ^Node {
+	assert(len(stops) >= 2)
+	tn := to_node(t)
+	acc := to_node(stops[0])
+	for i in 1 ..< len(stops) {
+		acc = mix(acc, stops[i], saturate(sub(mul(tn, f32(len(stops) - 1)), f32(i - 1))))
+	}
+	return acc
+}
 // Alpha-composites `top` over `bottom`.
 over :: proc(top, bottom: Expr) -> ^Node {return new_node(.Over, .Vec4, top, bottom)}
 // Composites layers in painter's order: the first layer is at the bottom.
