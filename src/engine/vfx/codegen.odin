@@ -16,6 +16,7 @@ Program :: struct {
 	source:   string,
 	defaults: []f32, // initial value of every uniform slot, padded to a multiple of 4
 	params:   []ParamSlot, // named slots, settable at runtime
+	animated: bool, // reads time() or age(), so it changes from frame to frame
 }
 
 @(private)
@@ -23,7 +24,8 @@ Gen :: struct {
 	funcs:  strings.Builder,
 	ids:    map[^Node]int,
 	values: [dynamic]f32,
-	named:  [dynamic]ParamSlot,
+	named:    [dynamic]ParamSlot,
+	animated: bool,
 }
 
 @(private)
@@ -74,7 +76,7 @@ compile :: proc(root: Expr, allocator := context.allocator) -> Program {
 		to_rgba[r.type],
 	)
 
-	return clone_program({strings.to_string(sb), g.values[:], g.named[:]}, allocator)
+	return clone_program({strings.to_string(sb), g.values[:], g.named[:], g.animated}, allocator)
 }
 
 clone_program :: proc(prog: Program, allocator := context.allocator) -> Program {
@@ -82,6 +84,7 @@ clone_program :: proc(prog: Program, allocator := context.allocator) -> Program 
 		source   = strings.clone(prog.source, allocator),
 		defaults = make([]f32, len(prog.defaults), allocator),
 		params   = make([]ParamSlot, len(prog.params), allocator),
+		animated = prog.animated,
 	}
 	copy(out.defaults, prog.defaults)
 	for s, i in prog.params {
@@ -173,8 +176,10 @@ emit :: proc(g: ^Gen, n: ^Node) -> int {
 		body = "u_size"
 	case .Time:
 		body = "u_time"
+		g.animated = true
 	case .Age:
 		body = "u_age"
+		g.animated = true
 	case .Px:
 		body = "u_px"
 	case .Add:

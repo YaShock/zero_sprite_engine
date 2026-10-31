@@ -1,0 +1,16 @@
+// Ice crystals: faceted diamonds with sharp highlights and a pulsing frost glow.
+size 120 140
+pad 24
+param aura = 0.5 in [0, 1] animate 2
+param tilt = 0.45 in [0, 1.2]
+
+let p = coord
+let tall = sd_polygon(p, [[0, -62], [22, 0], [0, 62], [-22, 0]])
+let left = sd_polygon(rotate(p - [-30, 22], -tilt), [[0, -36], [12, 0], [0, 36], [-12, 0]])
+let right = sd_polygon(rotate(p - [30, 22], tilt), [[0, -36], [12, 0], [0, 36], [-12, 0]])
+let d = min(tall, min(left, right))
+let depth = saturate(-d / 25)
+let color = ramp(saturate(fbm(p * 0.05, 3) * 0.7 + depth * 0.6), #2a6cc8, #8cd8ff, #eafaff)
+let facets = saturate(-d / 15) * 15
+let solid = mask(lit(color, facets, strength: 1.3, specular: 1.2, shininess: 40), fill(d))
+stack(mask(#8cd8ff, glow(d, 14) * aura), mask(#14100e, fill(d - 2)), solid)

@@ -1,0 +1,17 @@
+// Brick: a bevelled clay brick that cracks as `damage` grows (breakout).
+size 160 64
+pad 8
+param damage = 0.5 in [0, 1] animate 4 pingpong
+param base = #b4553a
+param seed = 7 in [0, 100]
+
+let d = sd_box(coord, size * 0.5 - 3, 8)
+let q = coord + seed * 37
+let grain = fbm(q * 0.1, 4)
+let speck = step(0.8, noise(q * 0.6))
+let clay = mix(shade(base, 0.8 + grain * 0.3), #3b1a12, speck * 0.6)
+let bevel = 1 - smoothstep(-10, 0, d)
+let surface = lit(clay, bevel * 6 + grain * 3 - speck, specular: 0.15)
+let warped = coord * 0.035 + fbm(coord * 0.05, 3) * 0.8
+let cracks = (1 - smoothstep(0.02, 0.07, voronoi_edge(warped + seed))) * damage
+mask(shade(surface, 1 - cracks * 0.8), fill(d))

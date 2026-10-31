@@ -202,6 +202,12 @@ create_space :: proc() {
 		}
 	}
 	game.comet_timer = rand.float32_range(2, 6)
+
+	// Looks spawned mid-game, compiled now so they don't stall the first launch or capture.
+	eng.precompile(ship_look(PLAYER_BLUE, 0))
+	eng.precompile(hit_look(PLAYER_BLUE, 0))
+	eng.precompile(capture_look(PLAYER_BLUE, 30))
+	eng.precompile(comet_look())
 }
 
 start_game :: proc(bots: int) {
@@ -343,6 +349,7 @@ arrive :: proc(index: int) {
 
 // Ships home in on their target, sliding around any planet in the way.
 update_ships :: proc(dt: f32) {
+	eng.profile_scope("update_ships")
 	for i := 0; i < len(game.ships); {
 		s := &game.ships[i]
 		target := game.planets[s.target]
@@ -380,6 +387,7 @@ update_ships :: proc(dt: f32) {
 }
 
 update_planets :: proc(dt: f32) {
+	eng.profile_scope("update_planets")
 	for &p in game.planets {
 		if p.owner != NEUTRAL {
 			p.ships += p.production * dt
@@ -390,6 +398,7 @@ update_planets :: proc(dt: f32) {
 }
 
 update_drifters :: proc(dt: f32) {
+	eng.profile_scope("update_drifters")
 	game.comet_timer -= dt
 	if game.comet_timer <= 0 {
 		game.comet_timer = rand.float32_range(COMET_INTERVAL[0], COMET_INTERVAL[1])
@@ -513,6 +522,7 @@ box_select :: proc(a, b: eng.Vector2, shift: bool) {
 }
 
 handle_pointer :: proc() {
+	eng.profile_scope("handle_pointer")
 	mouse := eng.mouse_position()
 	shift := rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT)
 	hovered := planet_at(mouse)
@@ -625,6 +635,7 @@ player_alive :: proc(player: int) -> bool {
 }
 
 update_hud :: proc() {
+	eng.profile_scope("update_hud")
 	totals: [MAX_BOTS + 2]f32
 	planets: [MAX_BOTS + 2]int
 	for p in game.planets {

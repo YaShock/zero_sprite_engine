@@ -1,0 +1,16 @@
+// Plasma orb: a swirling ball with a halo and a trail opposite to its velocity (breakout).
+size 60 60
+pad 70
+param radius = 26 in [8, 30]
+param velocity = [400, -200] in [-800, 800]
+param swirl_speed = 1.5 in [0, 5]
+
+let p = coord
+let d = sd_circle(p, radius)
+let trail = mask(#ff9a3c, glow(sd_segment(p, [0, 0], velocity * -0.08) - radius * 0.5, 6) * 0.55)
+let r = length(p) / radius
+let swirl = fbm(p * 0.12 + time * [swirl_speed, -swirl_speed * 0.6], 4)
+let hot = gradient(saturate(swirl + 0.6 - r), #ff5a1f, #fff3c4)
+let dome = sqrt(saturate(1 - r * r)) * radius * 0.8
+let body = mask(lit(hot, dome, specular: 0.9, shininess: 32), fill(d))
+stack(trail, mask(#ff8a3c, glow(d, radius * 0.8) * 0.7), body)

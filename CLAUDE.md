@@ -20,6 +20,18 @@ odin run src/demos/breakout
 
 There is no separate build step — `odin run` compiles and runs in one command. Each demo under `src/demos/` is its own `package main`.
 
+Profile any demo (F3 toggles the overlay, F4 writes a report to `profiles/`):
+```
+ZSE_PROFILE=1 odin run src/demos/galcon            # overlay on, report on exit
+ZSE_PROFILE_SECONDS=20 odin run src/demos/galcon   # benchmark: quit after 20 s and write a report
+```
+
+Entity editor (look scripts with live preview and param sliders), and its preset check:
+```
+odin run src/tools/editor
+odin run src/tools/editor -- --check
+```
+
 The OLS language server is configured via `ols.json` at the repo root.
 
 ## Architecture
@@ -36,7 +48,11 @@ A "look" is an expression tree of `^vfx.Node` built with constructors in `node.o
 - Nodes are allocated with `context.temp_allocator`; trees are transient and freed at the end of the frame.
 - GLSL helpers (noise, SDFs, lighting) live in `glsl.odin`. Format strings passed to `fmt.sbprintf` must escape braces as `{{`/`}}`.
 
-Adding a node: add an `Op`, a constructor in `node.odin`, and its case in `emit` in `codegen.odin`.
+- Every constructor takes `loc := #caller_location` and tags its node with the calling procedure (`Node.origin`), so a look's root names the function that built it; the profiler uses this to label looks.
+
+Adding a node: add an `Op`, a constructor in `node.odin` (with the `loc` parameter, returning through `origin`), its case in `emit` in `codegen.odin`, and, to expose it to look scripts, an entry in `BUILTINS` in `script.odin`.
+
+**Look scripts** (`script.odin`): a small text language mapping 1:1 onto the constructors (`let`, `param NAME = V in [MIN, MAX] animate PERIOD`, `size`, `pad`, `lifetime`, operators with constant folding, swizzles, named arguments). `parse_script` type-checks arguments so most mistakes are reported with line/column instead of producing bad GLSL.
 
 ### Engine (`src/engine/`)
 
@@ -48,7 +64,13 @@ Single global scene (`scene` in `entity.odin`, `engine` in `engine.odin`); all p
 
 `Drawable :: union { Material, Text }`, `Collider :: union { RectCollider, CircleCollider }`. Layers use swap-with-last removal; `set_layer_y_sorted` makes a layer draw by the bottom edge of each entity (for three-quarter views). `collide(a, b)` returns a `Contact` (normal pointing from b to a, depth); colliders are centered on the entity.
 
-`material.odin` binds `rlGetTextureIdDefault`/`rlGetShaderIdDefault` directly from `system:raylib`, because `vendor:raylib/rlgl` links a bundled static library that the Nix raylib does not provide.
+`gpu.odin` binds the few rlgl symbols it needs directly from `system:raylib` (because `vendor:raylib/rlgl` links a bundled static library that the Nix raylib does not provide) and loads OpenGL through the system GLFW that raylib uses, for timer queries and for compiling generated shaders to get the driver's error log. `try_make_material` reports a rejected shader instead of panicking; `draw_material_at` draws a material outside the scene (tool previews). `set_overlay` adds a per-frame draw callback in virtual coordinates; `InitOptions.match_window` makes the virtual resolution follow the window (tools).
+
+**Profiler** (`profiler.odin`): CPU zones form a call tree keyed by (name, parent); the engine times `update`/`render`/`present`/`cleanup` and game code adds `eng.profile_scope("name")`. GPU time per look comes from timestamp queries around each material draw, read back a few frames later. Shader compile time and startup are tracked separately from per-frame averages. Tool UIs and the profiler overlay are drawn with plain raylib primitives, not vfx, so they stay cheap and don't distort what is measured.
+
+### Tools (`src/tools/`)
+
+- `editor/`: entity editor. `text_editor.odin` (code editor widget), `ui.odin` (immediate-mode widgets, interface colors), `editor.odin` (app: recompiles after typing pauses, keeps the last good look on errors, param sliders and animation, presets in `presets/*.look`, reference and GLSL views).
 
 ### Demos (`src/demos/`)
 

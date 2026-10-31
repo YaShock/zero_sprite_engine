@@ -1,0 +1,16 @@
+// Brick wall: running-bond bricks and mortar, lit by a light sweeping across (breakout).
+size 480 320
+param brick = [64, 28] in [16, 120]
+param mortar = 2.5 in [0.5, 8]
+param light = [-200, -120] in [-240, 240] animate 6 pingpong
+
+let p = world
+let d = sd_box(brick_local(p, brick), brick * 0.5 - mortar, 3)
+let tone = hash(brick_id(p, brick))
+let bricks = shade(mix(#5a2a22, #8a4532, tone), 0.55 + fbm(p * 0.012) * 0.7)
+let joints = shade(#3a3634, 0.6 + noise(p * 0.3) * 0.4)
+let to_light = light - p
+let dist = length(to_light)
+let height = (1 - smoothstep(-4, 0, d)) * 3 + fbm(p * 0.09, 4) * 1.5
+let wall = lit(mix(joints, bricks, fill(d)), height, strength: 1.5, specular: 0.15, direction: to_light / max(dist, 1))
+shade(wall, 0.25 + exp(-dist / 200) * 0.9)

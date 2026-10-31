@@ -250,8 +250,9 @@ create_game :: proc() {
 	}
 
 	tones := random_tones()
-	eng.add_entity(terrain_look(game.path[:], tones), {MAP_WIDTH / 2, SCREEN_HEIGHT / 2}, {MAP_WIDTH, SCREEN_HEIGHT}, {z_index = Z_TERRAIN})
-	game.grid = eng.add_entity(grid_look(game.path[:]), {MAP_WIDTH / 2, SCREEN_HEIGHT / 2}, {MAP_WIDTH, SCREEN_HEIGHT}, {z_index = Z_OVERLAY})
+	map_center := eng.Vector2{MAP_WIDTH / 2, SCREEN_HEIGHT / 2}
+	eng.add_entity(terrain_look(game.path[:], tones), map_center, {MAP_WIDTH, SCREEN_HEIGHT}, {z_index = Z_TERRAIN, cache = true})
+	game.grid = eng.add_entity(grid_look(game.path[:]), map_center, {MAP_WIDTH, SCREEN_HEIGHT}, {z_index = Z_OVERLAY, cache = true})
 
 	start := game.path[0]
 	eng.add_entity(rift_look({18, 34}, RIFT_DARK, RIFT_PURPLE, RIFT_PINK, f32(0)), {14, start.y - 8}, {36, 68}, {z_index = Z_WORLD, pad = 16})
@@ -269,9 +270,29 @@ create_game :: proc() {
 	game.range_circle = eng.add_entity(range_look(), {}, {100, 100}, {z_index = Z_OVERLAY})
 	game.ghost = -1
 
+	precompile_effects()
 	create_ui()
 	refresh_overlays()
 	show_message("Build towers, then press SPACE", 4)
+}
+
+// Golems, projectiles and effects appear mid-game; compiling their shaders up front keeps the
+// first wave from freezing while the driver compiles them (the golem takes seconds).
+precompile_effects :: proc() {
+	for kind in EnemyKind {
+		eng.precompile(enemy_look(kind))
+		eng.precompile(golem_death_look(kind, 0, 1, 0))
+	}
+	for kind in TowerKind {
+		eng.precompile(ghost_tower_look(kind))
+		eng.precompile(impact_look(IMPACT_COLOR[kind], 0))
+		eng.precompile(build_look(IMPACT_COLOR[kind], 0))
+	}
+	eng.precompile(fireball_look())
+	eng.precompile(ice_shard_look())
+	eng.precompile(spark_orb_look())
+	eng.precompile(bolt_look(0))
+	eng.precompile(dust_puff({0, 0}, TOWER_STONE, 0))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -288,7 +309,7 @@ make_button :: proc(rect: rl.Rectangle, label: string, font_size: f32) -> Button
 
 create_ui :: proc() {
 	ui := &game.ui
-	eng.add_entity(panel_look(), {PANEL_CENTER_X, SCREEN_HEIGHT / 2}, {SCREEN_WIDTH - MAP_WIDTH, SCREEN_HEIGHT}, {z_index = Z_UI})
+	eng.add_entity(panel_look(), {PANEL_CENTER_X, SCREEN_HEIGHT / 2}, {SCREEN_WIDTH - MAP_WIDTH, SCREEN_HEIGHT}, {z_index = Z_UI, cache = true})
 	eng.add_text("GOLEM GATE", {PANEL_CENTER_X, 30}, 26, TEXT_GOLD, Z_TEXT, .Center)
 
 	eng.add_entity(coin_look(), {PANEL_X + 28, 72}, {18, 18}, {z_index = Z_UI_ICONS, pad = 4})
@@ -346,6 +367,7 @@ set_button :: proc(b: Button, enabled: bool, selected := false) {
 }
 
 update_ui :: proc() {
+	eng.profile_scope("update_ui")
 	ui := &game.ui
 	eng.set_text(ui.gold, fmt.tprintf("%d", game.gold))
 	eng.set_text(ui.lives, fmt.tprintf("%d", game.lives))
@@ -399,6 +421,7 @@ update_ui :: proc() {
 
 // Shows the grid, tile highlight, ghost and range circle that match the current mode.
 refresh_overlays :: proc() {
+	eng.profile_scope("refresh_overlays")
 	mouse := eng.mouse_position()
 	cell, on_map := cell_at(mouse)
 	on_map = on_map && mouse.x < MAP_WIDTH
@@ -544,6 +567,7 @@ spawn_enemy :: proc(kind: EnemyKind) {
 }
 
 update_waves :: proc(dt: f32) {
+	eng.profile_scope("update_waves")
 	switch game.phase {
 	case .Break:
 		game.countdown -= dt
@@ -622,6 +646,7 @@ enemy_escaped :: proc(index: int) {
 }
 
 update_enemies :: proc(dt: f32) {
+	eng.profile_scope("update_enemies")
 	for i := 0; i < len(game.enemies); {
 		e := &game.enemies[i]
 		info := ENEMIES[e.kind]
@@ -676,6 +701,7 @@ find_target :: proc(center: eng.Vector2, range: f32) -> int {
 }
 
 update_towers :: proc(dt: f32) {
+	eng.profile_scope("update_towers")
 	for &t in game.towers {
 		t.cooldown -= dt
 		if t.cooldown > 0 {
@@ -721,6 +747,7 @@ launch :: proc(t: Tower, target: int) {
 }
 
 update_projectiles :: proc(dt: f32) {
+	eng.profile_scope("update_projectiles")
 	for i := 0; i < len(game.projectiles); {
 		pr := &game.projectiles[i]
 		if find_enemy(pr.target) >= 0 {

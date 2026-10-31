@@ -1,0 +1,16 @@
+// Explosion: a brick shatters into shards with sparks and a shock ring; replays every 1.6 s.
+size 140 56
+pad 180
+lifetime 1.6
+param impact = [-20, 28] in [-70, 70]
+param shard_speed = 230 in [50, 500]
+param gravity = 900 in [0, 2000]
+
+let d = sd_box(coord, size * 0.5 - 2, 5)
+let clay = shade(#b4553a, 0.8 + fbm(coord * 0.1, 4) * 0.3)
+let brick = mask(lit(clay, (1 - smoothstep(-6, 0, d)) * 4), fill(d))
+let fade = 1 - smoothstep(0.5, 1.1, age)
+let shards = mask(shatter(brick, impact: impact, speed: shard_speed, gravity: gravity, cols: 5, rows: 2), fade)
+let burst = sparks(origin: impact, speed: 380, gravity: 700, life: 0.7, radius: 1.6, color: #ffb347, count: 28)
+let ring = stroke(length(coord - impact) - age * 320, 5) * exp(-age * 7)
+stack(shards, burst, mask(#fff4e0, ring))

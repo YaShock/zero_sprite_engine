@@ -1,0 +1,17 @@
+// Fire: a turbulent flame rising from its base, shaped from fractal noise.
+size 120 180
+pad 10
+param speed = 45 in [0, 120]
+param width = 34 in [10, 60]
+param height = 150 in [60, 180] animate 4
+param turbulence = 1.4 in [0.5, 3]
+
+let p = coord - [0, 80]           // the flame's base, near the bottom
+let up = -p.y
+let k = saturate(up / height)     // 0 at the base, 1 at the tip
+let swirl = fbm(vec2(p.x * 0.06, (up - time * speed) * 0.045), 5)
+let sway = (swirl - 0.5) * k * 30
+let half = (1 - pow(k, 1.6)) * width
+let body = saturate(1 - abs(p.x + sway) / max(half, 0.5)) * step(0, up)
+let heat = saturate(body * (swirl * turbulence + 0.2) * (1.2 - k))
+mask(ramp(heat, #d82a08, #ff8a1a, #ffe070, #fffae8), smoothstep(0.08, 0.3, heat))

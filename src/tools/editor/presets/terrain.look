@@ -1,0 +1,25 @@
+// Terrain: a meadow crossed by a cobbled road with dirt shoulders (tower defense).
+size 480 320
+param grass = #5a8a3a
+param dry = #a8a050
+param dirt = #7a5a3a
+param stone = #9a968e
+param road_width = 22 in [8, 40]
+param seed = 3 in [0, 100]
+
+let q = world + seed * 13.7
+let patches = fbm(q * 0.005, 4)
+let detail = fbm(q * 0.045, 4)
+let blades = noise(q * [0.5, 0.12])
+let meadow = shade(mix(grass, dry, smoothstep(0.42, 0.68, patches)), 0.72 + detail * 0.35 + blades * 0.16)
+
+let center = sd_polyline(world, [[-260, -60], [-80, -40], [20, 80], [140, 60], [260, 120]])
+let jagged = center + (fbm(q * 0.035, 3) - 0.5) * 12
+let road = 1 - smoothstep(-1.5, 1.5, jagged - road_width + 4)
+let shoulder = 1 - smoothstep(-3, 3, jagged - road_width - 6)
+
+let cobble = smoothstep(0.03, 0.14, voronoi_edge(q * 0.08))
+let stones = mix(shade(dirt, 0.55), shade(stone, 0.7 + noise(q * 0.25) * 0.4), cobble)
+let ground = mix(mix(meadow, shade(dirt, 0.7 + detail * 0.5), shoulder), stones, road)
+let height = detail * 2 + cobble * road * 2.2 + (1 - shoulder) * 0.8
+lit(ground, height, strength: 1.2, specular: 0.06)

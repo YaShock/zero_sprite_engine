@@ -1,5 +1,6 @@
 package main
 
+import eng "../../engine"
 import "core:math/linalg"
 import "core:math/rand"
 import "core:slice"
@@ -14,6 +15,7 @@ Bot :: struct {
 }
 
 update_bots :: proc(dt: f32) {
+	eng.profile_scope("update_bots")
 	for b in 0 ..< game.bot_count {
 		bot := &game.bots[b]
 		bot.timer -= dt

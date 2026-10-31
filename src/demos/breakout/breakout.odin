@@ -132,6 +132,13 @@ create_level :: proc() {
 		}
 	}
 
+	// Effects spawned mid-game, compiled now so the first explosion doesn't stall the game.
+	for kind in BrickKind {
+		eng.precompile(explosion_look(kind, 0, {0, 0}))
+	}
+	eng.precompile(spark_burst_look(SPARK_BLUE, 0, 1, 0, 14))
+	eng.precompile(shockwave_look(ALARM_RED, 500))
+
 	game.paddle = eng.add_entity(paddle_look(), {SCREEN_WIDTH / 2, PADDLE_Y}, PADDLE_SIZE, {z_index = Z_BRICKS, pad = 14})
 	eng.set_collider(game.paddle, eng.RectCollider{})
 
@@ -173,6 +180,7 @@ update_score :: proc(delta: int) {
 }
 
 move_paddle :: proc(dt: f32) {
+	eng.profile_scope("move_paddle")
 	paddle := eng.get_entity(game.paddle)
 	dir: f32
 	if rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT) {
@@ -210,6 +218,7 @@ set_ball_direction :: proc(dir: eng.Vector2) {
 }
 
 step_ball :: proc(dt: f32) {
+	eng.profile_scope("step_ball")
 	ball := eng.get_entity(game.ball)
 	ball.pos += game.ball_vel * dt
 

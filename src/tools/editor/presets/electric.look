@@ -1,0 +1,13 @@
+// Electric orb: filaments crackle where animated noise crosses one half (tower defense).
+size 160 160
+param orb = 18 in [6, 40]
+param reach = 14 in [4, 40]
+param flicker_rate = 14 in [1, 40]
+
+let d = length(coord) - orb
+let flicker = floor(time * flicker_rate)
+let field = fbm(coord * 0.05 + vec2(flicker, flicker * 1.7) * 0.37, 3)
+let filament = exp(-abs(field - 0.5) * 45)
+let k = saturate(filament * exp(-max(d, 0) / reach) * 1.4)
+let core = ramp(saturate(1.2 - length(coord) / orb), #7a5cff, #7cc8ff, #f2f0ff)
+stack(mask(#7a5cff, glow(d, 12) * 0.6), mask(mix(#7cc8ff, #f2f0ff, k), k), mask(core, fill(d)))

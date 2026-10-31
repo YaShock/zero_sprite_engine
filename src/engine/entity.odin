@@ -43,6 +43,15 @@ Entity :: struct {
 	collider:   Collider,
 	spawn_time: f64,
 	lifetime:   f32, // seconds of scene time until auto-removal; 0 = forever
+	cache:      LookCache,
+}
+
+// A still look rendered once into a texture and redrawn from it (SpawnOptions.cache).
+LookCache :: struct {
+	enabled: bool,
+	texture: rl.RenderTexture2D,
+	scale:   f32, // viewport scale it was rendered at
+	dirty:   bool, // a param changed since
 }
 
 @(private)
@@ -78,16 +87,21 @@ SpawnOptions :: struct {
 	lifetime: f32,
 	blend:    BlendMode,
 	rotation: f32,
+	// Render the look once into a texture and redraw that, re-rendering when the window
+	// scale or a param changes. For still, expensive looks; ignored if the look reads time()
+	// or age().
+	cache:    bool,
 }
 
 // Adds an entity whose appearance is the shader compiled from `look`.
-add_entity :: proc(look: vfx.Expr, pos, size: Vector2, opts := SpawnOptions{}) -> int {
-	id := add_drawable(make_material(look), pos, size, opts.z_index)
+add_entity :: proc(look: vfx.Expr, pos, size: Vector2, opts := SpawnOptions{}, loc := #caller_location) -> int {
+	id := add_drawable(make_material(look, loc), pos, size, opts.z_index)
 	e := get_entity(id)
 	e.pad = opts.pad
 	e.lifetime = opts.lifetime
 	e.blend = opts.blend
 	e.rotation = opts.rotation
+	e.cache.enabled = opts.cache && !shader_cache.entries[e.drawable.(Material).shader].program.animated
 	return id
 }
 
@@ -165,6 +179,9 @@ remove_entity :: proc(id: int) {
 	case Text:
 		delete(d.text)
 	}
+	if e.cache.texture.id != 0 {
+		rl.UnloadRenderTexture(e.cache.texture)
+	}
 	delete_key(&scene.entities, id)
 }
 
@@ -231,4 +248,5 @@ draw_text :: proc(e: ^Entity, t: Text) {
 		pos.x -= dims.x
 	}
 	rl.DrawTextEx(font, text, pos, t.font_size, spacing, t.color)
+	gpu_timer.dirty = true
 }

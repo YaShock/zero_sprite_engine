@@ -1,0 +1,26 @@
+// Planet: a rotating globe with oceans, continents, ice caps and clouds (galcon).
+size 220 220
+pad 30
+param radius = 100 in [40, 110]
+param spin = 6 in [0, 30]
+param light = [-0.7, -0.5] in [-1, 1]
+param ocean = #2a6ab0
+param land = #4a8a3a
+param atmosphere = #8cc8ff
+
+let n = coord / radius
+let r2 = dot(n, n)
+let z = sqrt(1 - r2)
+let lon = asin(n.x / max(sqrt(1 - n.y * n.y), 0.001))
+let surface = vec2(lon * radius + time * spin, asin(n.y) * radius)
+let h = fbm(surface * 0.045, 5)
+let seas = mix(shade(ocean, 0.6), ocean, saturate((h - 0.3) * 4))
+let color = mix(seas, shade(land, 0.8 + (h - 0.5) * 2), smoothstep(0.5, 0.53, h))
+let clouds = smoothstep(0.52, 0.72, fbm((surface + time * [3, 0]) * 0.06 + 31.7, 4))
+let albedo = mix(mix(color, #eef6ff, smoothstep(0.78, 0.9, abs(n.y))), #f8faff, clouds * 0.85)
+let day = smoothstep(-0.12, 0.4, dot(n, light) + z * 0.45)
+let disc = fill(length(coord) - radius)
+let globe = mask(shade(albedo, (0.05 + day) * (0.75 + z * 0.25)), disc)
+let rim = mask(atmosphere, pow(r2, 4) * (0.1 + day) * disc)
+let halo = mask(atmosphere, glow(length(coord) - radius, radius * 0.15) * (0.15 + day) * 0.7)
+stack(halo, globe, rim)

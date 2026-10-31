@@ -2,6 +2,17 @@
 
 This project aims to make a 2D engine with **purely** procedurally generated content. This means no more sprite sheets and fixed resolution artwork! Every single visible object shall be described as a mathematical formula.
 
+## Tools
+
+- Profiler
+    - Measure the RAM, CPU and graphics usage for a specific demo
+    - Should be able to show bottle-necks, hot paths, FPS consistency
+
+- Entity editor
+    - A tool that lets the user to compose visual effects, characters from the same composable functions that make up the visual entities in the demos
+    - The tools lets the user set parameters and see animations if some parameters are variables (between certain set intervals)
+    - Give a few presets like fire/terrain/brick that already give a composition of functions describing the entity with tweakable parameters
+
 ## First demos to accomplish
 
 - Breakout
