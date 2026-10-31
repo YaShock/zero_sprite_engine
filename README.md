@@ -32,12 +32,19 @@ This project aims to make a 2D engine with **purely** procedurally generated con
 
 ![TowerDefense](screenshots/tower-defense.png)
 
+- Space fighting game
+    - Galcon Fusion clone
+    - The background is space with stars, space debris, asteroids etc
+    - Randomly generated map with one or multiple opponents (bots)
+    - Each player (or bot) starts with one planet which generated ships that you can send to another planet to capture
+    - Planets are also randomly generated
+    - Spaceships can be simple but still resemble a triangular spaceship
+
+![TowerDefense](screenshots/galcon.png)
+
 - "Flappy Bird" clone
     - Sky generation
     - Bird generation
-- Space fighting game
-    - Spaceship and space + planet generation
-    - Galcon fusion clone
 - Large game project
     - TD wars with logistics, "heroes", minions
     - Robotic synthwave style

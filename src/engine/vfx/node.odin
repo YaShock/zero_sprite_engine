@@ -11,6 +11,7 @@
 package vfx
 
 import "base:builtin"
+import "core:math"
 import rl "vendor:raylib"
 
 Type :: enum u8 {
@@ -46,6 +47,8 @@ Op :: enum u8 {
 	Sin,
 	Cos,
 	Exp,
+	Sqrt,
+	Asin,
 	Pow,
 	Floor,
 	Fract,
@@ -242,6 +245,10 @@ neg :: proc(a: Expr) -> ^Node {return unary(.Neg, a)}
 sin :: proc(a: Expr) -> ^Node {return unary(.Sin, a)}
 cos :: proc(a: Expr) -> ^Node {return unary(.Cos, a)}
 exp :: proc(a: Expr) -> ^Node {return unary(.Exp, a)}
+// Square root of max(a, 0).
+sqrt :: proc(a: Expr) -> ^Node {return unary(.Sqrt, a)}
+// Arc sine of a clamped to [-1, 1].
+asin :: proc(a: Expr) -> ^Node {return unary(.Asin, a)}
 floor :: proc(a: Expr) -> ^Node {return unary(.Floor, a)}
 fract :: proc(a: Expr) -> ^Node {return unary(.Fract, a)}
 length :: proc(a: Expr) -> ^Node {return new_node(.Length, .Float, a)}
@@ -306,6 +313,29 @@ voronoi_edge :: proc(p: Expr) -> ^Node {return new_node(.VoronoiEdge, .Float, p)
 sd_box :: proc(p, half_size: Expr, radius: Expr = f32(0)) -> ^Node {return new_node(.SdBox, .Float, p, half_size, radius)}
 sd_circle :: proc(p, radius: Expr) -> ^Node {return new_node(.SdCircle, .Float, p, radius)}
 sd_segment :: proc(p, a, b: Expr) -> ^Node {return new_node(.SdSegment, .Float, p, a, b)}
+// Signed distance to a convex polygon, as the largest distance to any of its edge lines
+// (exact inside, slightly rounded-off outside the corners). Vertices may wind either way.
+sd_convex_polygon :: proc(p: Expr, points: [][2]f32) -> ^Node {
+	assert(len(points) >= 3)
+	centroid: [2]f32
+	for v in points {
+		centroid += v / f32(len(points))
+	}
+	pn := to_node(p)
+	d: ^Node
+	for a, i in points {
+		b := points[(i + 1) % len(points)]
+		edge := b - a
+		normal := [2]f32{edge.y, -edge.x} / math.sqrt(edge.x * edge.x + edge.y * edge.y)
+		if (centroid.x - a.x) * normal.x + (centroid.y - a.y) * normal.y > 0 {
+			normal = -normal
+		}
+		side := dot(sub(pn, a), normal)
+		d = side if d == nil else max(d, side)
+	}
+	return d
+}
+
 // Distance to an open polyline: the union of its segments.
 sd_polyline :: proc(p: Expr, points: [][2]f32) -> ^Node {
 	assert(len(points) >= 2)

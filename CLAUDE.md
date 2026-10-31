@@ -56,3 +56,4 @@ Each demo is a self-contained `package main` importing `eng "../../engine"` and 
 
 - `breakout/`: bricks, wall background, paddle, ball, explosions.
 - `tower_defense/`: randomized terrain and road (`terrain_look`), walking golems whose animation, facing, health and status effects are params (`enemy_look`), three towers with level-driven looks, projectiles, shard deaths; balance tables live in `data.odin`.
+- `galcon/`: Galcon Fusion clone. Space backdrop, drifting asteroids/debris/comets, planets as rotating lit globes (`sphere` + `planet_surface` per kind, randomized palettes), owner rings and selection driven by params; bot AI lives in `bots.odin`.

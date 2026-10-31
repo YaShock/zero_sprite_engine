@@ -214,6 +214,10 @@ emit :: proc(g: ^Gen, n: ^Node) -> int {
 		body = fmt.tprintf("cos(%s)", a(c, 0))
 	case .Exp:
 		body = fmt.tprintf("exp(%s)", a(c, 0))
+	case .Sqrt:
+		body = fmt.tprintf("sqrt(max(%s, 0.0))", a(c, 0))
+	case .Asin:
+		body = fmt.tprintf("asin(clamp(%s, -1.0, 1.0))", a(c, 0))
 	case .Pow:
 		body = fmt.tprintf("pow(max(%s, 0.0), %s(%s))", a(c, 0), GLSL_TYPE[n.type], a(c, 1))
 	case .Floor:
