@@ -1,18 +1,29 @@
 package engine
 
+import "base:intrinsics"
 import "core:math"
 import "core:math/rand"
 import "core:strings"
 import "core:time"
+import "vendor:glfw"
 import rl "vendor:raylib"
 
 Vector2 :: rl.Vector2
 Color :: rl.Color
 Rectangle :: rl.Rectangle
 
+VSync :: enum {
+	// On, unless it holds the game below its target FPS (e.g. fps = 144 on a 60 Hz monitor);
+	// then frames are paced by the engine's own limiter instead. Off when fps is 0.
+	Auto,
+	On, // never faster than the monitor's refresh rate
+	Off,
+}
+
 InitOptions :: struct {
 	width, height: i32, // virtual resolution; the window letterboxes it at any size
-	fps:           i32,
+	fps:           i32, // target frame rate; 0 = unlimited
+	vsync:         VSync,
 	title:         string,
 	num_layers:    int,
 	bg_color:      Color, // letterbox bars
@@ -35,10 +46,22 @@ Engine :: struct {
 	time:          f64, // scene time, advances with time_scale
 	time_scale:    f32,
 	frame_budget:  f64, // seconds per frame at the target FPS; 0 = unlimited
+	vsync:         VSync,
+	vsync_on:      bool, // whether the swap currently waits for the monitor
+	pacing:        Pacing,
 	shake:         f32,
 	viewport:      Viewport,
 	match_window:  bool,
 	overlay:       proc(),
+}
+
+// Frame timing gathered while VSync.Auto decides whether vsync holds the game back.
+@(private)
+Pacing :: struct {
+	frames:          int,
+	frame_seconds:   f64,
+	present_seconds: f64,
+	decided:         bool,
 }
 
 @(private)
@@ -55,7 +78,10 @@ init_context :: proc(init: InitOptions) {
 	}
 	init_scene(init.num_layers)
 
-	flags: rl.ConfigFlags = {.VSYNC_HINT}
+	engine.frame_budget = 1 / f64(init.fps) if init.fps > 0 else 0
+	engine.vsync = init.vsync
+	engine.vsync_on = init.vsync == .On || (init.vsync == .Auto && init.fps > 0)
+	flags: rl.ConfigFlags = {.VSYNC_HINT} if engine.vsync_on else {}
 	if init.resizable {
 		flags += {.WINDOW_RESIZABLE}
 	}
@@ -65,7 +91,6 @@ init_context :: proc(init: InitOptions) {
 	// raylib's own frame limiter busy-waits; vsync paces frames and run() sleeps when it
 	// doesn't (see limit_frame_rate).
 	rl.SetTargetFPS(0)
-	engine.frame_budget = 1 / f64(init.fps) if init.fps > 0 else 0
 	rl.SetExitKey(.KEY_NULL)
 	init_gpu()
 	init_profiler(init.title)
@@ -115,18 +140,81 @@ update_viewport :: proc() {
 	}
 }
 
-// When vsync doesn't pace the swap (disabled, or a compositor that doesn't block), sleeps off
-// the rest of the frame budget instead of spinning.
+// Switches vsync on or off at runtime. Auto starts with vsync on and turns it off if it keeps
+// the game below its target FPS.
+set_vsync :: proc(mode: VSync) {
+	engine.vsync = mode
+	engine.pacing = {}
+	apply_vsync(mode == .On || (mode == .Auto && engine.frame_budget > 0))
+}
+
 @(private)
-limit_frame_rate :: proc() {
+apply_vsync :: proc(on: bool) {
+	glfw.SwapInterval(1 if on else 0)
+	engine.vsync_on = on
+}
+
+// For VSync.Auto: after the frame rate settles, turns vsync off if frames run slower than the
+// target while most of their time is spent waiting in the swap, i.e. the monitor's refresh
+// rate is below the target. Monitor refresh rates can't be queried reliably (Wayland doesn't
+// say which monitor a window is on), so this measures instead.
+@(private)
+check_vsync :: proc(frame_seconds, present_seconds: f64) {
+	WARMUP :: 30
+	SAMPLE :: 60
+	pacing := &engine.pacing
+	if engine.vsync != .Auto || !engine.vsync_on || pacing.decided || engine.frame_budget <= 0 {
+		return
+	}
+	pacing.frames += 1
+	if pacing.frames <= WARMUP {
+		return
+	}
+	pacing.frame_seconds += frame_seconds
+	pacing.present_seconds += present_seconds
+	if pacing.frames < WARMUP + SAMPLE {
+		return
+	}
+	pacing.decided = true
+	frame := pacing.frame_seconds / SAMPLE
+	present := pacing.present_seconds / SAMPLE
+	if frame > engine.frame_budget * 1.1 && present > 0.5 * frame {
+		apply_vsync(false)
+	}
+}
+
+// Sleeps through all but the last millisecond and spins through that, for pacing accurate to
+// well under a millisecond without burning a core (time.accurate_sleep spins up to ~5 ms).
+@(private)
+precise_sleep :: proc(d: time.Duration) {
+	start := time.tick_now()
+	if d > 2 * time.Millisecond {
+		time.sleep(d - time.Millisecond)
+	}
+	for time.tick_since(start) < d {
+		intrinsics.cpu_relax()
+	}
+}
+
+// Sleeps off the rest of the frame budget when vsync doesn't already pace frames at or below
+// the target. Without vsync it spins only for the last moment, for accurate pacing.
+@(private)
+limit_frame_rate :: proc() -> (frame_seconds: f64) {
 	@(static) frame_start: time.Tick
-	if engine.frame_budget > 0 && frame_start != {} {
+	if frame_start != {} {
 		elapsed := time.duration_seconds(time.tick_diff(frame_start, time.tick_now()))
-		if remaining := engine.frame_budget - elapsed; remaining > 0.001 {
-			time.sleep(time.Duration(remaining * f64(time.Second)))
+		if remaining := engine.frame_budget - elapsed; engine.frame_budget > 0 && remaining > 0.0005 {
+			wait := time.Duration(remaining * f64(time.Second))
+			if engine.vsync_on {
+				time.sleep(wait)
+			} else {
+				precise_sleep(wait)
+			}
 		}
+		frame_seconds = time.duration_seconds(time.tick_diff(frame_start, time.tick_now()))
 	}
 	frame_start = time.tick_now()
+	return
 }
 
 run :: proc(on_update: proc(delta_time: f32)) {
@@ -183,14 +271,16 @@ run :: proc(on_update: proc(delta_time: f32)) {
 
 		// Swapping waits for vsync / the target frame rate, so this is mostly idle time.
 		profile_begin("present")
+		present_start := time.tick_now()
 		rl.EndDrawing()
+		present_seconds := time.duration_seconds(time.tick_diff(present_start, time.tick_now()))
 		profile_end()
 
 		profile_begin("cleanup")
 		remove_expired_entities()
 		profile_end()
 		free_all(context.temp_allocator)
-		limit_frame_rate()
+		check_vsync(limit_frame_rate(), present_seconds)
 	}
 
 	if profiler.report_on_exit {

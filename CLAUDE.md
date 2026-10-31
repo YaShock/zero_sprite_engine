@@ -58,7 +58,7 @@ Adding a node: add an `Op`, a constructor in `node.odin` (with the `loc` paramet
 
 Single global scene (`scene` in `entity.odin`, `engine` in `engine.odin`); all procs operate on these singletons.
 
-1. `init_context(InitOptions)`: window at a virtual resolution, letterboxed via a `Camera2D` (no render texture, so shaders evaluate at native resolution; `u_px` gives the virtual size of one pixel for anti-aliasing).
+1. `init_context(InitOptions)`: window at a virtual resolution, letterboxed via a `Camera2D` (no render texture, so shaders evaluate at native resolution; `u_px` gives the virtual size of one pixel for anti-aliasing). Frame pacing: raylib's busy-waiting limiter is disabled; `InitOptions.vsync` (`Auto` by default, also `On`/`Off`, changeable with `set_vsync`) starts with vsync and, in `Auto`, turns it off after ~1.5 s if it keeps the game below `fps` (e.g. a 60 Hz monitor with `fps = 144`); without vsync the engine sleeps to the target, spinning only the last millisecond. Monitor refresh rates aren't queried because Wayland doesn't report which monitor a window is on.
 2. `add_entity(look, pos, size, SpawnOptions)` compiles the look into a `Material` (shared shader + owned param values) and returns an `int` ID. `pos` is the **center**; `size` is the logical size seen by `vfx.size()`; `pad` enlarges the drawn quad for glows/debris; `lifetime` auto-removes the entity; `blend` selects alpha/additive. `add_text` adds the only non-shader drawable.
 3. `run(on_update)`: advances scene time (scaled by `set_time_scale`, 0 = paused), calls `on_update`, draws layers in z order, removes expired entities, frees the temp allocator.
 

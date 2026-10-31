@@ -374,7 +374,7 @@ main :: proc() {
 		eng.InitOptions {
 			width = SCREEN_WIDTH,
 			height = SCREEN_HEIGHT,
-			fps = 60,
+			fps = 120,
 			title = "Breakout",
 			num_layers = 6,
 			bg_color = rl.BLACK,
