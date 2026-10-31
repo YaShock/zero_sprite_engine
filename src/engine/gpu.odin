@@ -4,6 +4,7 @@ package engine
 // shader compile logs for reporting errors in generated GLSL.
 
 import "core:strings"
+import "vfx"
 import gl "vendor:OpenGL"
 import "vendor:glfw"
 
@@ -51,6 +52,12 @@ check_fragment_shader :: proc(source: string, allocator := context.temp_allocato
 	buf := make([]u8, max(length, 1), allocator)
 	gl.GetShaderInfoLog(shader, i32(len(buf)), &length, &buf[0])
 	return false, string(buf[:length])
+}
+
+// Compiles the GLSL library every look shader starts with (vfx/glsl/*.glsl) on its own, so a
+// mistake in it is reported once instead of breaking every look.
+check_glsl_library :: proc() -> (ok: bool, log: string) {
+	return check_fragment_shader(vfx.library_test_source())
 }
 
 // GPU timestamps: one pool of queries per frame in flight, read back a few frames later so

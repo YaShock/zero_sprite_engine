@@ -115,8 +115,14 @@ load_preset_list :: proc() {
 	slice.sort(app.presets[:])
 }
 
-// Compiles every preset, printing errors; true if all of them compile.
+// Checks the shared GLSL library, then compiles every preset, printing errors; true if all of
+// them compile.
 check_presets :: proc() -> bool {
+	if ok, log := eng.check_glsl_library(); !ok {
+		fmt.eprintf("FAIL glsl library (src/engine/vfx/glsl)\n%s\n", log)
+		return false
+	}
+	fmt.println("ok   glsl library")
 	all_ok := true
 	for path in app.presets {
 		data, err := os.read_entire_file(path, context.temp_allocator)

@@ -46,7 +46,7 @@ A "look" is an expression tree of `^vfx.Node` built with constructors in `node.o
 - Every numeric leaf becomes a slot in `uniform vec4 u_p[]` (packed four per vec4, since drivers may pad each element of a float array to a full register); only tree *structure* (plus compile-time ints such as fbm octaves or shard grid size) is baked into the shader. The generated source is the shader cache key, so e.g. all bricks of one kind share one shader and differ only in parameter values.
 - `vfx.param(name, default)` creates a named slot that game code changes at runtime with `eng.set_param(id, name, value)`.
 - Nodes are allocated with `context.temp_allocator`; trees are transient and freed at the end of the frame.
-- GLSL helpers (noise, SDFs, lighting) live in `glsl.odin`. Format strings passed to `fmt.sbprintf` must escape braces as `{{`/`}}`.
+- The GLSL library lives in `vfx/glsl/`: `header.glsl` (inputs and uniforms; `compile` appends the per-look `uniform vec4 u_p[N]`) and `prelude.glsl` (noise, SDF, lighting and particle helpers that generated code calls by name). `glsl.odin` embeds them with `#load`, so the binary has no runtime file dependency; renaming a helper means updating `codegen.odin` too. `editor --check` compiles the library on its own before the presets. Format strings passed to `fmt.sbprintf` in `codegen.odin` must escape braces as `{{`/`}}`.
 
 - Every constructor takes `loc := #caller_location` and tags its node with the calling procedure (`Node.origin`), so a look's root names the function that built it; the profiler uses this to label looks.
 

@@ -57,7 +57,8 @@ compile :: proc(root: Expr, allocator := context.allocator) -> Program {
 	for len(g.values) % 4 != 0 {
 		append(&g.values, 0)
 	}
-	fmt.sbprintf(&sb, FRAGMENT_HEADER, builtin.max(len(g.values) / 4, 1))
+	strings.write_string(&sb, FRAGMENT_HEADER)
+	fmt.sbprintf(&sb, "uniform vec4 u_p[%d];\n", builtin.max(len(g.values) / 4, 1))
 	for s in g.named {
 		fmt.sbprintf(&sb, "// param %s @ %d\n", s.name, s.offset)
 	}
@@ -310,7 +311,20 @@ emit :: proc(g: ^Gen, n: ^Node) -> int {
 	case .Shatter:
 		emit_shatter(sb, n, c)
 	case .Sparks:
-		emit_sparks(sb, n, c)
+		body = fmt.tprintf(
+			"sparks(p, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %d)",
+			a(c, 0),
+			a(c, 1),
+			a(c, 2),
+			a(c, 3),
+			a(c, 4),
+			a(c, 5),
+			a(c, 6),
+			a(c, 7),
+			a(c, 8),
+			a(c, 9),
+			n.count[0],
+		)
 	}
 	if body != "" {
 		fmt.sbprintf(sb, "return %s; ", body)
@@ -392,43 +406,5 @@ emit_shatter :: proc(sb: ^strings.Builder, n: ^Node, c: [MAX_ARGS]int) {
 		cols,
 		rows,
 		c[0],
-	)
-}
-
-@(private)
-emit_sparks :: proc(sb: ^strings.Builder, n: ^Node, c: [MAX_ARGS]int) {
-	fmt.sbprintf(
-		sb,
-		`
-	float t = n%d(p); vec2 o = n%d(p); float dir = n%d(p); float spread = n%d(p);
-	float speed = n%d(p); float grav = n%d(p); float rad = n%d(p); float life = n%d(p);
-	float sd = n%d(p); vec4 color = n%d(p);
-	float acc = 0.0;
-	for (int i = 0; i < %d; i++) {{
-		vec2 h = hash22(vec2(float(i) * 1.37, sd));
-		float l = life * (0.4 + 0.6 * hash11(float(i) * 5.11 + sd));
-		float k = t / l;
-		if (k >= 1.0) continue;
-		float ang = dir + (h.x * 2.0 - 1.0) * spread;
-		vec2 v = vec2(cos(ang), sin(ang)) * speed * (0.25 + 0.75 * h.y);
-		vec2 pos = o + v * t + vec2(0.0, 0.5 * grav * t * t);
-		vec2 vnow = v + vec2(0.0, grav * t);
-		float d = sd_segment(p, pos, pos - vnow * 0.02);
-		acc += (1.0 - k) * exp(-d * d / (rad * rad));
-	}}
-	acc = clamp(acc, 0.0, 1.5);
-	return vec4(mix(color.rgb, vec3(1.0), clamp(acc - 0.5, 0.0, 1.0) * 0.7), min(acc, 1.0) * color.a);
-`,
-		c[0],
-		c[1],
-		c[2],
-		c[3],
-		c[4],
-		c[5],
-		c[6],
-		c[7],
-		c[8],
-		c[9],
-		n.count[0],
 	)
 }
