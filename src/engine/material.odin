@@ -7,6 +7,7 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:time"
+import gl "vendor:OpenGL"
 import rl "vendor:raylib"
 import "vfx"
 
@@ -18,17 +19,14 @@ Material :: struct {
 
 @(private)
 ShaderEntry :: struct {
-	shader:     rl.Shader,
-	program:    vfx.Program,
-	label:      string, // where the first material using it was made, for the profiler
-	loc_time:   i32,
-	loc_age:    i32,
-	loc_px:     i32,
-	loc_rot:    i32,
-	loc_size:   i32,
-	loc_extent: i32,
-	loc_origin: i32,
-	loc_params: i32,
+	shader:         rl.Shader,
+	program:        vfx.Program,
+	label:          string, // where the first material using it was made, for the profiler
+	stride:         int, // vec4s per instance record: 3 + parameter vec4s (see vfx/glsl/vertex.glsl)
+	loc_modelview:  i32,
+	loc_projection: i32,
+	loc_time:       i32,
+	loc_px:         i32,
 	// Scene lights (only in shaders using vfx.lit_scene; -1 otherwise)
 	loc_light_count: i32,
 	loc_light_pos:   i32,
@@ -122,7 +120,8 @@ try_make_material :: proc(look: vfx.Expr, label := "") -> (m: Material, err: str
 
 @(private)
 load_glsl :: proc(source: string) -> (rl.Shader, bool) {
-	shader := rl.LoadShaderFromMemory(nil, strings.clone_to_cstring(source, context.temp_allocator))
+	vertex := strings.clone_to_cstring(vfx.VERTEX_SHADER, context.temp_allocator)
+	shader := rl.LoadShaderFromMemory(vertex, strings.clone_to_cstring(source, context.temp_allocator))
 	return shader, rl.IsShaderValid(shader) && shader.id != rlGetShaderIdDefault()
 }
 
@@ -134,14 +133,11 @@ add_shader_entry :: proc(shader: rl.Shader, temp: vfx.Program, label: string) ->
 			shader = shader,
 			program = vfx.clone_program(temp),
 			label = strings.clone(label),
+			stride = 3 + len(temp.defaults) / 4,
+			loc_modelview = rl.GetShaderLocation(shader, "u_modelview"),
+			loc_projection = rl.GetShaderLocation(shader, "u_projection"),
 			loc_time = rl.GetShaderLocation(shader, "u_time"),
-			loc_age = rl.GetShaderLocation(shader, "u_age"),
 			loc_px = rl.GetShaderLocation(shader, "u_px"),
-			loc_rot = rl.GetShaderLocation(shader, "u_rot"),
-			loc_size = rl.GetShaderLocation(shader, "u_size"),
-			loc_extent = rl.GetShaderLocation(shader, "u_extent"),
-			loc_origin = rl.GetShaderLocation(shader, "u_origin"),
-			loc_params = rl.GetShaderLocation(shader, "u_p"),
 			loc_light_count = rl.GetShaderLocation(shader, "u_light_count"),
 			loc_light_pos = rl.GetShaderLocation(shader, "u_light_pos"),
 			loc_light_color = rl.GetShaderLocation(shader, "u_light_color"),
@@ -149,6 +145,11 @@ add_shader_entry :: proc(shader: rl.Shader, temp: vfx.Program, label: string) ->
 			lights_frame = -1,
 		},
 	)
+	// Constant per shader: where the instance records are and how long each one is.
+	entry := &shader_cache.entries[len(shader_cache.entries) - 1]
+	stride := i32(entry.stride)
+	rl.SetShaderValue(shader, rl.GetShaderLocation(shader, "u_stride"), &stride, .INT)
+	gl.UniformBlockBinding(shader.id, gl.GetUniformBlockIndex(shader.id, "Instances"), INSTANCE_BINDING)
 	return len(shader_cache.entries) - 1
 }
 
@@ -206,6 +207,8 @@ unload_materials :: proc() {
 	}
 	delete(shader_cache.entries)
 	delete(shader_cache.by_key)
+	delete(scene_draws.records)
+	delete(scene_draws.steps)
 }
 
 @(private)
@@ -272,14 +275,49 @@ get_param :: proc(id: int, name: string) -> f32 {
 	return params[slot.offset]
 }
 
+// Draws collected before any is issued, so that all their instance records reach the GPU
+// in one upload (see upload_instances). Consecutive instances of one shader with the same
+// blending share an instanced draw call; whatever raylib draws (text, cached looks) goes
+// between calls in scene order.
 @(private)
-draw_material :: proc(e: ^Entity, m: ^Material) {
+DrawList :: struct {
+	records: [dynamic][4]f32, // instance records, see vfx/glsl/vertex.glsl
+	steps:   [dynamic]DrawStep,
+}
+
+@(private)
+DrawStep :: union {
+	DrawCall,
+	RaylibDraw,
+}
+
+// `count` instances of a look shader whose records start at `first` in DrawList.records.
+@(private)
+DrawCall :: struct {
+	shader: int,
+	blend:  BlendMode,
+	px:     f32,
+	first:  int,
+	count:  int,
+	pixels: f32, // screen pixels covered, for the profiler
+}
+
+@(private)
+RaylibDraw :: struct {
+	entity: int,
+}
+
+@(private)
+scene_draws: DrawList
+
+@(private)
+draw_material :: proc(list: ^DrawList, e: ^Entity, m: ^Material) {
 	if e.cache.enabled && e.cache.texture.id != 0 {
-		draw_cached(e, m)
+		append(&list.steps, RaylibDraw{e.id})
 		return
 	}
 	px := 1 / engine.viewport.scale
-	draw_quad(m, e.pos, e.size, e.pad, 1, px, f32(engine.time - e.spawn_time), e.rotation, e.blend, e.pos)
+	add_instance(list, m, e.pos, e.size, e.pad, 1, px, f32(engine.time - e.spawn_time), e.rotation, e.blend, e.pos)
 }
 
 // Draws a material outside the scene, e.g. a preview in a tool. `zoom` scales it on screen
@@ -296,64 +334,83 @@ draw_material_at :: proc(
 	world_center: Maybe(Vector2) = nil,
 ) {
 	px := 1 / (engine.viewport.scale * zoom)
-	draw_quad(m, center, size, pad, zoom, px, age, rotation, blend, world_center.? or_else center)
+	draw_now(m, center, size, pad, zoom, px, age, rotation, blend, world_center.? or_else center)
 }
 
-// Draws the shader quad: `quad_scale` maps virtual units to the current drawing space and
-// `px` is the size of one target pixel in virtual units (for anti-aliasing).
 @(private)
-draw_quad :: proc(m: ^Material, center, size: Vector2, pad, quad_scale, px, age, rotation: f32, blend: BlendMode, origin: Vector2) {
-	entry := &shader_cache.entries[m.shader]
-	sh := entry.shader
-	size, origin, age, px := size, origin, age, px
+draw_now :: proc(m: ^Material, center, size: Vector2, pad, quad_scale, px, age, rotation: f32, blend: BlendMode, origin: Vector2) {
+	list := DrawList {
+		records = make([dynamic][4]f32, context.temp_allocator),
+		steps   = make([dynamic]DrawStep, context.temp_allocator),
+	}
+	add_instance(&list, m, center, size, pad, quad_scale, px, age, rotation, blend, origin)
+	submit_draws(&list)
+}
+
+// Adds a material's quad to the list, in the last draw call if it can take it. `quad_scale`
+// maps virtual units to the current drawing space and `px` is the size of one target pixel
+// in virtual units (for anti-aliasing).
+@(private)
+add_instance :: proc(list: ^DrawList, m: ^Material, center, size: Vector2, pad, quad_scale, px, age, rotation: f32, blend: BlendMode, origin: Vector2) {
+	stride := shader_cache.entries[m.shader].stride
+	call: ^DrawCall
+	if len(list.steps) > 0 {
+		last, is_call := &list.steps[len(list.steps) - 1].(DrawCall)
+		if is_call && last.shader == m.shader && last.blend == blend && last.px == px && len(list.records) - last.first + stride <= INSTANCE_VEC4S {
+			call = last
+		}
+	}
+	if call == nil {
+		for len(list.records) % instances.align != 0 {
+			append(&list.records, [4]f32{})
+		}
+		append(&list.steps, DrawCall{shader = m.shader, blend = blend, px = px, first = len(list.records)})
+		call = &list.steps[len(list.steps) - 1].(DrawCall)
+	}
 	extent := size + 2 * pad
 	screen_extent := extent * quad_scale
-	t := f32(engine.time)
 	rot := rotation * math.RAD_PER_DEG
-
-	gpu_stamp_pending()
-	if blend == .Additive {
-		rl.BeginBlendMode(.ADDITIVE)
+	append(&list.records, [4]f32{center.x, center.y, screen_extent.x, screen_extent.y})
+	append(&list.records, [4]f32{size.x, size.y, rot, age})
+	append(&list.records, [4]f32{extent.x, extent.y, origin.x, origin.y})
+	for i := 0; i < len(m.params); i += 4 {
+		append(&list.records, [4]f32{m.params[i], m.params[i + 1], m.params[i + 2], m.params[i + 3]})
 	}
-	// Begin/End per entity flushes the batch, so each draw sees its own uniforms.
-	rl.BeginShaderMode(sh)
-	rl.SetShaderValue(sh, entry.loc_time, &t, .FLOAT)
-	rl.SetShaderValue(sh, entry.loc_age, &age, .FLOAT)
-	rl.SetShaderValue(sh, entry.loc_px, &px, .FLOAT)
-	rl.SetShaderValue(sh, entry.loc_rot, &rot, .FLOAT)
-	rl.SetShaderValue(sh, entry.loc_size, &size, .VEC2)
-	rl.SetShaderValue(sh, entry.loc_extent, &extent, .VEC2)
-	rl.SetShaderValue(sh, entry.loc_origin, &origin, .VEC2)
-	if len(m.params) > 0 {
-		rl.SetShaderValueV(sh, entry.loc_params, &m.params[0], .VEC4, i32(len(m.params) / 4))
-	}
-	// Uniforms persist in the shader, so the lights are uploaded once per frame per shader.
-	if entry.loc_light_count >= 0 && entry.lights_frame != engine.frame {
-		entry.lights_frame = engine.frame
-		l := light_uniforms()
-		rl.SetShaderValue(sh, entry.loc_light_count, &l.count, .INT)
-		rl.SetShaderValueV(sh, entry.loc_light_pos, &l.pos[0], .VEC4, MAX_LIGHTS)
-		rl.SetShaderValueV(sh, entry.loc_light_color, &l.color[0], .VEC4, MAX_LIGHTS)
-		rl.SetShaderValue(sh, entry.loc_ambient, &l.ambient, .VEC3)
-	}
-
-	// The default 1x1 white texture just carries texture coordinates across the quad.
-	quad := rl.Texture2D {
-		id      = rlGetTextureIdDefault(),
-		width   = 1,
-		height  = 1,
-		mipmaps = 1,
-		format  = .UNCOMPRESSED_R8G8B8A8,
-	}
-	dest := rl.Rectangle{center.x, center.y, screen_extent.x, screen_extent.y}
-	rl.DrawTexturePro(quad, {0, 0, 1, 1}, dest, screen_extent / 2, rotation, rl.WHITE)
-	rl.EndShaderMode()
-	if blend == .Additive {
-		rl.EndBlendMode()
-	}
+	call.count += 1
 	pixels := extent / px
-	gpu_stamp(m.shader, pixels.x * pixels.y)
-	profiler.frame_draws += 1
+	call.pixels += pixels.x * pixels.y
+}
+
+// Uploads the list's instance records, issues its draws in order and empties it.
+@(private)
+submit_draws :: proc(list: ^DrawList) {
+	upload_instances(list.records[:])
+	for step in list.steps {
+		switch s in step {
+		case DrawCall:
+			gpu_stamp_pending()
+			rlDrawRenderBatchActive() // raylib's queued draws come first
+			if s.blend == .Additive {
+				rl.BeginBlendMode(.ADDITIVE)
+			}
+			draw_instances(&shader_cache.entries[s.shader], s.first, s.count, s.px)
+			if s.blend == .Additive {
+				rl.EndBlendMode()
+			}
+			gpu_stamp(s.shader, s.pixels)
+			profiler.frame_draws += 1
+		case RaylibDraw:
+			e := get_entity(s.entity)
+			switch &d in e.drawable {
+			case Material:
+				draw_cached(e, &d)
+			case Text:
+				draw_text(e, d)
+			}
+		}
+	}
+	clear(&list.records)
+	clear(&list.steps)
 }
 
 @(private)
@@ -397,7 +454,7 @@ refresh_caches :: proc() {
 		rl.ClearBackground({0, 0, 0, 0})
 		// Write the shader's color and alpha as they are, not blended over the cleared texture.
 		rlDisableColorBlend()
-		draw_quad(m, {f32(w), f32(h)} / 2, e.size, e.pad, scale, 1 / scale, 0, 0, .Alpha, e.pos)
+		draw_now(m, {f32(w), f32(h)} / 2, e.size, e.pad, scale, 1 / scale, 0, 0, .Alpha, e.pos)
 		rlEnableColorBlend()
 		rl.EndTextureMode()
 		c.scale, c.dirty = scale, false

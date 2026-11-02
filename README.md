@@ -75,15 +75,33 @@ Engine enhancements proposed so far, roughly in order of value for effort. Each 
     - A cheaper `lit` option using screen-space derivatives (one height evaluation instead of four)
     - Render expensive layers such as backgrounds at reduced resolution
 - Draw calls
-    - Instancing: draw consecutive entities sharing a shader in one call, with per-entity data in a texture buffer and a custom vertex shader
+    - Group entities by shader within a layer where they don't overlap, so mixed layers batch too (the stress test still needs 1,006 calls for 1,860 entities)
+    - Read the parameters that are equal across a draw call from uniforms instead of the instance block, for large heavy looks (Breakout's wall costs 18% more per pixel since instancing)
 - Particles
     - CPU-simulated particles (velocity, drag, gravity, lifetime, collisions) drawn with instancing
     - GPU particle simulation with transform feedback, colliding with any look's distance field
 - Lighting
     - Tower defense: fire towers and lightning orbs as scene lights on the golems
     - Deferred 2D lighting: color, height and glow buffers lit in one pass, for many lights, glowing objects lighting their neighbours, and soft shadows
-- Text as visual effects
-    - A vector stroke font as a distance field, so text gets outlines, glow, embossing and animation like any other look
+- Text as visual effects (text is the last thing still drawn with a fixed-resolution bitmap font)
+    - Glyphs as distance fields, so every existing node works on text
+        - Vector stroke font first: each glyph a few line segments and arcs (e.g. the public-domain Hershey simplex font as data), its distance the union of `sd_segment`s minus the stroke width
+        - Later, if typographic quality is needed: TrueType Bézier outlines evaluated in the shader (as the Slug library does)
+    - A `text` node, keeping structure in the shader and content in parameters
+        - The font compiles once into a GLSL function `glyph(code, p)`; the string's character codes are parameter slots, padded to a maximum length fixed when the look is built
+        - Changing the text only rewrites parameter values, so a score updated every frame never recompiles
+        - Monospace first (the character under a pixel is `floor(x / advance)`, one glyph evaluated per pixel); proportional spacing later, from a width table on the CPU passing per-character offsets
+        - ASCII only at first, no kerning
+    - `add_text` keeps its signature but becomes a material entity, so the `Text` drawable can go; raylib text stays for debug output such as `show_fps`
+    - Effects for free once text is a distance field
+        - Outlines and drop shadows (`stroke`, `glow`) for readability over busy backgrounds, e.g. Galcon's planet labels and the tower defense panel
+        - Gradient fills, owner-colored glow, embossing with `lit` to match each game's style
+        - Numbers that pop when they change (a `changed_time` param, like `hit_time`), text writing itself on (`age()` and the character index), wobble (`at`), shattering "VICTORY" (`shatter`)
+        - Crisp at any window size, anti-aliased through `u_px`
+    - Risks
+        - Thin strokes shimmer below about 10 px: enforce a minimum stroke width in pixels
+        - Each glyph is evaluated over its whole quad: fine for HUD-length strings, long paragraphs would want one quad per line
+    - Order: stroke font with the monospace `text` node, then point `add_text` at it and outline the demos' labels, then proportional widths, then text animations
 - Tooling
     - Hot-reload `.look` files into running demos
     - A tree view of a look in the editor, with the profiler's cost per node

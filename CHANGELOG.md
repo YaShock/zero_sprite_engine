@@ -10,7 +10,44 @@ Each entry records a commit with the engine's own profiler results, so performan
 
 Hardware for all entries so far: NVIDIA GeForce RTX 3070 Laptop GPU.
 
-## Structure-keyed shader cache, shader manifest, scene lights
+## Draw looks with instancing
+
+- Looks are drawn with their own instanced draw calls instead of through raylib: consecutive entities with the same shader and blending share one call, and each entity's position, size, rotation, age and parameter values are a record in a uniform block that one shared vertex shader and the look's fragment shader read.
+- The scene's records are uploaded once per frame; text and cached looks are still drawn by raylib, between the calls, in scene order.
+
+| Demo | FPS | Frame ms (median / p99 / worst) | Hitches | GPU ms/frame | CPU | Startup ms | Shaders compiled |
+|---|---|---|---|---|---|---|---|
+| Breakout | 81.6 | 12.00 / 17.47 / 23.62 | 1 | 1.48 | 100% | 44 | 0 (20 from manifest in 22 ms) |
+| Tower defense | 58.2 | 16.78 / 23.00 / 39.32 | 1 | 1.16 | 92% | 78 | 0 (27 from manifest in 46 ms) |
+| Galcon | 58.4 | 16.77 / 22.84 / 34.27 | 2 | 1.41 | 92% | 20 | 0 (7 from manifest in 3 ms) |
+
+Most expensive looks (GPU ms/frame): Breakout: `wall_background_look` 0.80 ms, `brick_look` 0.66 ms; Tower defense: `enemy_look` 0.77 ms, `terrain_look` 0.08 ms; Galcon: `space_look` 1.37 ms, `asteroid_look` 0.03 ms.
+
+Compared with bfa0220, measured alternately in the same session (it measured 3.72, 3.03 and 2.63 ms of GPU time per frame there):
+
+- GPU time per frame: Breakout −60%, tower defense −62%, Galcon −46%. Draw calls per frame: Breakout 82 → 13 (the 72 bricks take 6), Galcon 31 → 4, tower defense 33 → 21.
+- CPU time in `render`: Breakout 0.79 → 0.42 ms, Galcon 0.51 → 0.42 ms, tower defense unchanged.
+- Breakout's FPS rises from 70 to 82 on the virtual display; the other demos are capped at 60.
+- A look's parameters are now read from the instance block with an index instead of from plain uniforms, which costs per pixel in large, heavy looks: Breakout's full-screen wall measured +18% with the load held equal (eight walls in both versions). In the table above it shows 0.50 → 0.80 ms, partly because the GPU clocks down once the rest of the frame gets cheaper.
+- Shader startup compiles take longer per shader (tower defense 29 → 46 ms for 27 shaders), with the vertex shader and uniform block linked into each program.
+
+Stress test, the average of two runs (bfa0220 in parentheses):
+
+| Stage | Entities | Setup ms | Frame avg ms | Frame p99 ms |
+|---|---|---|---|---|
+| 1. still variety | 400 | 12.9 | 22.7 (26.4) | 27.2 (38.3) |
+| 2. animated | 800 | 11.2 | 27.8 (37.5) | 33.7 (53.8) |
+| 3. movers and lights | 1,160 | 8.3 | 32.0 (35.7) | 39.6 (39.6) |
+| 4. spawn churn (+120 effects/s) | 1,160 | 0 | 32.5 (35.7) | 41.8 (40.1) |
+| 5. double load | 1,860 | 19.0 | 34.5 (39.3) | 40.6 (43.7) |
+
+Over the whole run: GPU time per frame 11.44 → 6.47 ms, CPU in `render` 5.27 → 3.47 ms. The stress layers mix families in random order, so few neighbours share a shader (1,087 → 1,006 draw calls); the gain there comes from each call being cheaper (no raylib batch flush and uniform uploads per entity): most looks cost a quarter to a third of before at the same number of calls. Heavy looks pay the per-pixel cost above: `brick_look` 0.92 → 1.76 ms, `rings_look` and `marble_look` +8%.
+
+Tried and measured slower on the way: instance records in a buffer texture (wall +73%, one fetch per parameter per pixel), `glBufferSubData` per draw call (+35–60% for looks drawn alone, a stall per call) and mapping the buffer per draw call (the driver then keeps it in system memory: wall +94%, space +58%).
+
+Also tried and not adopted: fading out fbm layers finer than a pixel. At the demos' native scale almost no layer is finer than a pixel, so it cost about 3% of GPU time in every demo and only helped looks drawn at half size.
+
+## bfa0220 — Structure-keyed shader cache, shader manifest, scene lights
 
 - Shaders are cached by a hash of the look's structure, so spawning a look seen before generates no GLSL.
 - Every shader a game compiles is recorded in `.shader-cache/` and compiled at the next startup, before the first frame.

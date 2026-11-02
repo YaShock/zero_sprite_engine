@@ -1,6 +1,5 @@
 package vfx
 
-import "base:builtin"
 import "core:fmt"
 import "core:hash"
 import "core:strings"
@@ -53,13 +52,11 @@ compile :: proc(root: Expr, allocator := context.allocator) -> Program {
 	root_id := emit(&g, r)
 
 	sb := strings.builder_make()
-	// Slots are packed into vec4s: drivers may pad every element of a float array to a full
-	// vec4 register, which would quarter the number of parameters a look can have.
+	// Slots are packed into vec4s, as they're laid out in the instance records.
 	for len(g.values) % 4 != 0 {
 		append(&g.values, 0)
 	}
 	strings.write_string(&sb, FRAGMENT_HEADER)
-	fmt.sbprintf(&sb, "uniform vec4 u_p[%d];\n", builtin.max(len(g.values) / 4, 1))
 	for s in g.named {
 		fmt.sbprintf(&sb, "// param %s @ %d\n", s.name, s.offset)
 	}
@@ -72,7 +69,14 @@ compile :: proc(root: Expr, allocator := context.allocator) -> Program {
 	}
 	fmt.sbprintf(
 		&sb,
-		"void main() {{\n\tvec2 p = (fragTexCoord - 0.5) * u_extent;\n\t%s v = n%d(p);\n\tfinalColor = %s * fragColor;\n}}\n",
+		`void main() {{
+	u_size = v_shape.xy; u_rot = v_shape.z; u_age = v_shape.w;
+	u_extent = v_frame.xy; u_origin = v_frame.zw;
+	vec2 p = (fragTexCoord - 0.5) * u_extent;
+	%s v = n%d(p);
+	finalColor = %s;
+}}
+`,
 		GLSL_TYPE[r.type],
 		root_id,
 		to_rgba[r.type],
@@ -189,7 +193,7 @@ delete_program :: proc(prog: Program, allocator := context.allocator) {
 slot_expr :: proc(offset: int, type: Type) -> string {
 	slot :: proc(i: int) -> string {
 		components := "xyzw"
-		return fmt.tprintf("u_p[%d].%c", i / 4, components[i % 4])
+		return fmt.tprintf("u_p(%d).%c", i / 4, components[i % 4])
 	}
 	switch type {
 	case .Float:

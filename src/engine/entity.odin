@@ -225,12 +225,13 @@ render_entities :: proc() {
 			assert(e.drawable != nil, "Entity drawable cannot be nil!")
 			switch &d in e.drawable {
 			case Material:
-				draw_material(e, &d)
+				draw_material(&scene_draws, e, &d)
 			case Text:
-				draw_text(e, d)
+				append(&scene_draws.steps, RaylibDraw{id})
 			}
 		}
 	}
+	submit_draws(&scene_draws)
 }
 
 @(private)

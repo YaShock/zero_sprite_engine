@@ -1,11 +1,12 @@
 package engine
 
-// Direct OpenGL access for what raylib doesn't expose: GPU timer queries for the profiler and
-// shader compile logs for reporting errors in generated GLSL.
+// Direct OpenGL access for what raylib doesn't expose: instanced draws of looks, GPU timer
+// queries for the profiler and shader compile logs for reporting errors in generated GLSL.
 
 import "core:strings"
 import "vfx"
 import gl "vendor:OpenGL"
+import rl "vendor:raylib"
 import "vendor:glfw"
 
 // vendor:raylib/rlgl links its own bundled static library, which distro/Nix builds of raylib
@@ -14,11 +15,12 @@ foreign import raylib_lib "system:raylib"
 
 @(private, default_calling_convention = "c")
 foreign raylib_lib {
-	rlGetTextureIdDefault :: proc() -> u32 ---
 	rlGetShaderIdDefault :: proc() -> u32 ---
 	rlDrawRenderBatchActive :: proc() ---
 	rlEnableColorBlend :: proc() ---
 	rlDisableColorBlend :: proc() ---
+	rlGetMatrixModelview :: proc() -> rl.Matrix ---
+	rlGetMatrixProjection :: proc() -> rl.Matrix ---
 }
 
 // raylib creates its window through the system GLFW, so GLFW's loader sees its context.
@@ -27,6 +29,7 @@ init_gpu :: proc() {
 	gl.load_up_to(3, 3, proc(p: rawptr, name: cstring) {
 		(^rawptr)(p)^ = glfw.GetProcAddress(name)
 	})
+	init_instances()
 }
 
 gpu_renderer :: proc() -> string {
@@ -37,7 +40,12 @@ gpu_renderer :: proc() -> string {
 // only prints the log, it doesn't return it.
 @(private)
 check_fragment_shader :: proc(source: string, allocator := context.temp_allocator) -> (ok: bool, log: string) {
-	shader := gl.CreateShader(gl.FRAGMENT_SHADER)
+	return check_shader(gl.FRAGMENT_SHADER, source, allocator)
+}
+
+@(private)
+check_shader :: proc(kind: u32, source: string, allocator := context.temp_allocator) -> (ok: bool, log: string) {
+	shader := gl.CreateShader(kind)
 	defer gl.DeleteShader(shader)
 	src := strings.clone_to_cstring(source, context.temp_allocator)
 	gl.ShaderSource(shader, 1, &src, nil)
@@ -57,7 +65,84 @@ check_fragment_shader :: proc(source: string, allocator := context.temp_allocato
 // Compiles the GLSL library every look shader starts with (vfx/glsl/*.glsl) on its own, so a
 // mistake in it is reported once instead of breaking every look.
 check_glsl_library :: proc() -> (ok: bool, log: string) {
+	if ok, log = check_shader(gl.VERTEX_SHADER, vfx.VERTEX_SHADER); !ok {
+		return
+	}
 	return check_fragment_shader(vfx.library_test_source())
+}
+
+// Instance records of look draws (see vfx/glsl/vertex.glsl), in a uniform buffer: each draw
+// call binds a 64 KB window of it as its shader's `Instances` block, so a look reads its
+// parameters as cheaply as uniforms while a warp stays within one instance. All records of
+// a draw list are uploaded at once, into fresh storage (draws already issued keep the old
+// one): writing the buffer once per draw call either stalled on it or, when mapped, made the
+// driver keep it in system memory, where large quads read their parameters slowly.
+INSTANCE_VEC4S :: 4096 // vec4s in the Instances block (64 KB, see vfx/glsl/header.glsl)
+
+@(private)
+INSTANCE_BINDING :: 0
+
+@(private)
+Instances :: struct {
+	buffer: u32,
+	vao:    u32, // empty: the vertex shader has no attributes, but core GL needs a VAO bound
+	align:  int, // GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT in vec4s: where a draw call's records may start
+}
+
+@(private)
+instances: Instances
+
+@(private)
+init_instances :: proc() {
+	max_block, align: i32
+	gl.GetIntegerv(gl.MAX_UNIFORM_BLOCK_SIZE, &max_block)
+	gl.GetIntegerv(gl.UNIFORM_BUFFER_OFFSET_ALIGNMENT, &align)
+	assert(max_block >= INSTANCE_VEC4S * size_of([4]f32), "the GPU's uniform blocks are too small for the instance records")
+	instances.align = max(int(align) / size_of([4]f32), 1)
+	gl.GenBuffers(1, &instances.buffer)
+	gl.GenVertexArrays(1, &instances.vao)
+}
+
+@(private)
+upload_instances :: proc(records: [][4]f32) {
+	if len(records) == 0 {
+		return
+	}
+	// Every draw call binds a whole block, so there must be one block of room after the last
+	// call's first record.
+	size := len(records) * size_of([4]f32)
+	gl.BindBuffer(gl.UNIFORM_BUFFER, instances.buffer)
+	gl.BufferData(gl.UNIFORM_BUFFER, size + INSTANCE_VEC4S * size_of([4]f32), nil, gl.STREAM_DRAW)
+	gl.BufferSubData(gl.UNIFORM_BUFFER, 0, size, raw_data(records))
+	gl.BindBuffer(gl.UNIFORM_BUFFER, 0)
+}
+
+// Draws `count` instances of a look shader whose records start at `first` in the records
+// last uploaded, with the uniforms that every look reads set to the values given. Anything
+// raylib has batched must have been flushed before.
+@(private)
+draw_instances :: proc(entry: ^ShaderEntry, first, count: int, px: f32) {
+	gl.BindBufferRange(gl.UNIFORM_BUFFER, INSTANCE_BINDING, instances.buffer, first * size_of([4]f32), INSTANCE_VEC4S * size_of([4]f32))
+	gl.UseProgram(entry.shader.id)
+	modelview := rl.MatrixToFloatV(rlGetMatrixModelview())
+	projection := rl.MatrixToFloatV(rlGetMatrixProjection())
+	gl.UniformMatrix4fv(entry.loc_modelview, 1, false, &modelview[0])
+	gl.UniformMatrix4fv(entry.loc_projection, 1, false, &projection[0])
+	gl.Uniform1f(entry.loc_time, f32(engine.time))
+	gl.Uniform1f(entry.loc_px, px)
+	// Uniforms persist in the program, so the lights are uploaded once per frame per shader.
+	if entry.loc_light_count >= 0 && entry.lights_frame != engine.frame {
+		entry.lights_frame = engine.frame
+		l := light_uniforms()
+		gl.Uniform1i(entry.loc_light_count, l.count)
+		gl.Uniform4fv(entry.loc_light_pos, MAX_LIGHTS, &l.pos[0][0])
+		gl.Uniform4fv(entry.loc_light_color, MAX_LIGHTS, &l.color[0][0])
+		gl.Uniform3fv(entry.loc_ambient, 1, &l.ambient[0])
+	}
+	gl.BindVertexArray(instances.vao)
+	gl.DrawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, i32(count))
+	gl.BindVertexArray(0)
+	gl.UseProgram(0)
 }
 
 // GPU timestamps: one pool of queries per frame in flight, read back a few frames later so
