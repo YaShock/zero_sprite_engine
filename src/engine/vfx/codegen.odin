@@ -2,6 +2,7 @@ package vfx
 
 import "base:builtin"
 import "core:fmt"
+import "core:hash"
 import "core:strings"
 
 ParamSlot :: struct {
@@ -16,7 +17,7 @@ Program :: struct {
 	source:   string,
 	defaults: []f32, // initial value of every uniform slot, padded to a multiple of 4
 	params:   []ParamSlot, // named slots, settable at runtime
-	animated: bool, // reads time() or age(), so it changes from frame to frame
+	animated: bool, // reads time(), age() or the scene lights, so it changes from frame to frame
 }
 
 @(private)
@@ -78,6 +79,87 @@ compile :: proc(root: Expr, allocator := context.allocator) -> Program {
 	)
 
 	return clone_program({strings.to_string(sb), g.values[:], g.named[:], g.animated}, allocator)
+}
+
+// What the shader cache needs from a look, without generating any GLSL: a key for its
+// structure (equal keys mean identical generated shaders) and the initial values of its
+// parameter slots, laid out exactly as compile lays them out.
+Layout :: struct {
+	key:      u64,
+	defaults: []f32, // padded to a multiple of 4, like Program.defaults
+}
+
+layout :: proc(root: Expr, allocator := context.allocator) -> Layout {
+	w: Walker
+	{
+		context.allocator = context.temp_allocator
+		walk(&w, to_node(root))
+		for len(w.values) % 4 != 0 {
+			append(&w.values, 0)
+		}
+	}
+	defaults := make([]f32, len(w.values), allocator)
+	copy(defaults, w.values[:])
+	return {hash.fnv64a(w.bytes[:]), defaults}
+}
+
+@(private)
+Walker :: struct {
+	ids:    map[^Node]int,
+	bytes:  [dynamic]u8, // everything that shapes the generated code, in emission order
+	values: [dynamic]f32,
+	named:  [dynamic]ParamSlot,
+}
+
+// Mirrors emit: children first, every shared node once, with ids in emission order. Records
+// each node's op, type, compile-time counts, names and child ids, which together determine
+// the generated source, and allocates parameter slots in the same order as alloc_slot.
+@(private)
+walk :: proc(w: ^Walker, n: ^Node) -> int {
+	if id, ok := w.ids[n]; ok {
+		return id
+	}
+	c: [MAX_ARGS]int
+	for i in 0 ..< n.nargs {
+		c[i] = walk(w, n.args[i])
+	}
+	id := len(w.ids)
+	w.ids[n] = id
+
+	put :: proc(w: ^Walker, v: int) {
+		bytes := transmute([8]u8)u64(v)
+		append(&w.bytes, ..bytes[:])
+	}
+	put(w, int(n.op))
+	put(w, int(n.type))
+	put(w, n.nargs)
+	for i in 0 ..< n.nargs {
+		put(w, c[i])
+	}
+	put(w, n.count[0])
+	put(w, n.count[1])
+	if n.op == .Param || n.op == .Swizzle {
+		put(w, len(n.name))
+		append(&w.bytes, n.name)
+	}
+
+	#partial switch n.op {
+	case .Const:
+		for i in 0 ..< TYPE_WIDTH[n.type] {
+			append(&w.values, n.value[i])
+		}
+	case .Param:
+		for s in w.named {
+			if s.name == n.name {
+				return id
+			}
+		}
+		append(&w.named, ParamSlot{n.name, len(w.values), n.type})
+		for i in 0 ..< TYPE_WIDTH[n.type] {
+			append(&w.values, n.value[i])
+		}
+	}
+	return id
 }
 
 clone_program :: proc(prog: Program, allocator := context.allocator) -> Program {
@@ -308,6 +390,19 @@ emit :: proc(g: ^Gen, n: ^Node) -> int {
 			h,
 		)
 		body = fmt.tprintf("light(%s, g * %s, %s, %s, %s)", a(c, 0), a(c, 2), a(c, 3), a(c, 4), a(c, 5))
+	case .LitScene:
+		h := c[1]
+		fmt.sbprintf(
+			sb,
+			"float e = %s; vec2 g = vec2(n%d(p + vec2(e, 0.0)) - n%d(p - vec2(e, 0.0)), n%d(p + vec2(0.0, e)) - n%d(p - vec2(0.0, e))) / (2.0 * e); ",
+			a(c, 5),
+			h,
+			h,
+			h,
+			h,
+		)
+		body = fmt.tprintf("scene_light(%s, g * %s, %s, %s, u_origin + rot2(p, u_rot))", a(c, 0), a(c, 2), a(c, 3), a(c, 4))
+		g.animated = true
 	case .Shatter:
 		emit_shatter(sb, n, c)
 	case .Sparks:

@@ -80,6 +80,7 @@ main :: proc() {
 			bg_color = BACKGROUND,
 			resizable = true,
 			match_window = true,
+			no_shader_manifest = true,
 		},
 	)
 	app.zoom = 1

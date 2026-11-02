@@ -65,7 +65,6 @@ Drifter :: struct {
 	vel:   eng.Vector2,
 	spin:  f32, // degrees/s
 	wraps: bool,
-	lit:   bool, // keeps its "light" param pointing at the sun while it spins
 }
 
 State :: enum {
@@ -183,6 +182,10 @@ create_space :: proc() {
 	clear(&game.lines)
 	corners := [?]eng.Vector2{{-220, -160}, {SCREEN_WIDTH + 220, -160}, {-220, SCREEN_HEIGHT + 160}, {SCREEN_WIDTH + 220, SCREEN_HEIGHT + 160}}
 	game.sun = rand.choice(corners[:])
+	// The sun lights the asteroids and debris; planets shade their globes from it themselves.
+	eng.clear_lights()
+	eng.set_ambient(SPACE_AMBIENT, 0.12)
+	eng.add_light({kind = .Point, pos = game.sun, height = 500, color = SUN_CORE, intensity = 1.5, radius = 4000})
 	nebula_hue := rand.float32_range(NEBULA_HUE[0], NEBULA_HUE[1])
 	nebula_a := rl.ColorFromHSV(nebula_hue, 0.7, 0.55)
 	nebula_b := rl.ColorFromHSV(nebula_hue + rand.float32_range(40, 120), 0.6, 0.45)
@@ -195,10 +198,10 @@ create_space :: proc() {
 		if i < ASTEROIDS {
 			r := rand.float32_range(5, 18)
 			id := eng.add_entity(asteroid_look(r, rand.float32_range(0, 100)), pos, {2 * r, 2 * r}, {z_index = Z_DRIFT, pad = r * 0.4 + 2})
-			append(&game.drifters, Drifter{id = id, vel = dir * rand.float32_range(4, 14), spin = rand.float32_range(-20, 20), wraps = true, lit = true})
+			append(&game.drifters, Drifter{id = id, vel = dir * rand.float32_range(4, 14), spin = rand.float32_range(-20, 20), wraps = true})
 		} else {
 			id := eng.add_entity(debris_look(rand.float32_range(0, 100)), pos, {14, 10}, {z_index = Z_DRIFT, pad = 2})
-			append(&game.drifters, Drifter{id = id, vel = dir * rand.float32_range(10, 25), spin = rand.float32_range(-90, 90), wraps = true, lit = true})
+			append(&game.drifters, Drifter{id = id, vel = dir * rand.float32_range(10, 25), spin = rand.float32_range(-90, 90), wraps = true})
 		}
 	}
 	game.comet_timer = rand.float32_range(2, 6)
@@ -419,12 +422,6 @@ update_drifters :: proc(dt: f32) {
 			if e.pos.x > SCREEN_WIDTH + margin {e.pos.x -= SCREEN_WIDTH + 2 * margin}
 			if e.pos.y < -margin {e.pos.y += SCREEN_HEIGHT + 2 * margin}
 			if e.pos.y > SCREEN_HEIGHT + margin {e.pos.y -= SCREEN_HEIGHT + 2 * margin}
-		}
-		if d.lit {
-			// Light direction in the spinning object's own frame.
-			l := linalg.normalize(game.sun - e.pos)
-			a := -e.rotation * math.RAD_PER_DEG
-			eng.set_param(d.id, "light", eng.Vector2{l.x * math.cos(a) - l.y * math.sin(a), l.x * math.sin(a) + l.y * math.cos(a)})
 		}
 		i += 1
 	}

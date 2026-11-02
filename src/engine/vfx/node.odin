@@ -85,6 +85,7 @@ Op :: enum u8 {
 	Shade,
 	Mask,
 	Lit,
+	LitScene,
 	// Effects
 	Shatter,
 	Sparks,
@@ -404,6 +405,23 @@ Light :: struct {
 }
 
 // Lights `color` as if it were a surface whose relief is given by `height`.
+// Lights `color` as a surface with relief `height` under the scene's lights (engine.add_light)
+// rather than one fixed direction: point lights fall off with distance and shade the relief
+// from where they are. `light.direction` is ignored. Counts as animated, since lights move.
+lit_scene :: proc(color, height: Expr, light := Light{}, loc := #caller_location) -> ^Node {
+	n := new_node(
+		.LitScene,
+		.Vec4,
+		color,
+		height,
+		or_else_expr(light.strength, f32(1)),
+		or_else_expr(light.specular, f32(0)),
+		or_else_expr(light.shininess, f32(24)),
+		or_else_expr(light.step, f32(1)),
+	)
+	return origin(n, loc)
+}
+
 lit :: proc(color, height: Expr, light := Light{}, loc := #caller_location) -> ^Node {
 	n := new_node(
 		.Lit,

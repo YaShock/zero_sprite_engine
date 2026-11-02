@@ -127,7 +127,7 @@ brick_look :: proc(kind: BrickKind, seed: f32, damage, hit_time: fx.Expr) -> ^fx
 	d := fx.sd_box(fx.coord(), fx.sub(fx.mul(fx.size(), 0.5), 1.5), 4)
 	s := brick_surface(kind, seed)
 
-	color := fx.lit(s.color, fx.add(fx.mul(bevel(d, 5), 3), s.height), s.light)
+	color := fx.lit_scene(s.color, fx.add(fx.mul(bevel(d, 5), 3), s.height), s.light)
 	if s.emissive != nil {
 		color = fx.over(s.emissive, color)
 	}
@@ -167,7 +167,8 @@ explosion_look :: proc(kind: BrickKind, seed: f32, impact: [2]f32) -> ^fx.Node {
 	return fx.stack(dust, shards, sparks, fx.mask(WARM_WHITE, ring))
 }
 
-// Running-bond brick wall in world space, lit by a point light (the ball).
+// Running-bond brick wall in world space, in shadow except where the scene lights (the ball)
+// reach it.
 wall_background_look :: proc() -> ^fx.Node {
 	p := fx.world()
 	cell := [2]f32{64, 28}
@@ -178,18 +179,15 @@ wall_background_look :: proc() -> ^fx.Node {
 	brick := fx.gradient(tone, WALL_BRICK_DARK, WALL_BRICK_LIGHT)
 	brick = fx.shade(brick, fx.add(0.55, fx.mul(fx.fbm(fx.mul(p, 0.012)), 0.7)))
 	mortar := fx.shade(MORTAR, fx.add(0.6, fx.mul(fx.noise(fx.mul(p, 0.3)), 0.4)))
-	color := fx.mix(mortar, brick, fx.fill(d))
+	// Darker than the bricks in play: the ball's light has to carry the scene.
+	color := fx.shade(fx.mix(mortar, brick, fx.fill(d)), 0.4)
 
-	light := fx.param("light", [2]f32{480, 400})
-	to_light := fx.sub(light, p)
-	dist := fx.length(to_light)
 	height := fx.add(fx.mul(bevel(d, 4), 3), fx.mul(fx.fbm(fx.mul(p, 0.09), 4), 1.5))
-	color = fx.lit(color, height, {strength = 1.5, specular = 0.15, direction = fx.div(to_light, fx.max(dist, 1))})
+	color = fx.lit_scene(color, height, {strength = 1.5, specular = 0.15})
 
-	falloff := fx.add(0.2, fx.mul(fx.exp(fx.mul(dist, -1.0 / 260)), 0.9))
 	centered := fx.sub(fx.uv(), 0.5)
 	vignette := fx.sub(1, fx.mul(fx.dot(centered, centered), 1.2))
-	return fx.shade(color, fx.mul(falloff, vignette))
+	return fx.shade(color, vignette)
 }
 
 // Riveted steel pipe; `vertical` picks the axis it runs along.
@@ -206,7 +204,7 @@ pipe_look :: proc(vertical: bool) -> ^fx.Node {
 	tube := fx.pow(fx.saturate(fx.sub(1, fx.mul(across, across))), 0.5)
 	joint := fx.sub(1, fx.smoothstep(2, 4, fx.abs(fx.swizzle(fx.tile(fx.vec2(along, 0), [2]f32{90, 1}), "x"))))
 	color := fx.shade(PIPE_STEEL, fx.add(0.7, fx.mul(fx.fbm(fx.mul(p, 0.08), 4), 0.5)))
-	return fx.lit(color, fx.add(fx.mul(tube, 6), fx.mul(joint, 2)), {specular = 0.7, shininess = 28})
+	return fx.lit_scene(color, fx.add(fx.mul(tube, 6), fx.mul(joint, 2)), {specular = 0.7, shininess = 28})
 }
 
 // Steel capsule with a flowing energy core that surges at `hit_time`.
@@ -217,7 +215,7 @@ paddle_look :: proc() -> ^fx.Node {
 
 	shell := fx.gradient(fx.swizzle(fx.uv(), "y"), CHROME_LIGHT, CHROME_DARK)
 	height := fx.add(fx.mul(bevel(d, 7), 4), fx.mul(fx.noise(fx.mul(p, [2]f32{0.03, 1.5})), 0.3))
-	body := fx.mask(fx.lit(shell, height, {specular = 1, shininess = 36}), fx.fill(d))
+	body := fx.mask(fx.lit_scene(shell, height, {specular = 1, shininess = 36}), fx.fill(d))
 
 	hit := fx.exp(fx.mul(fx.sub(fx.time(), fx.param("hit_time", f32(-100))), -6))
 	slot := fx.sd_box(p, fx.sub(half, [2]f32{16, 6}), 2)

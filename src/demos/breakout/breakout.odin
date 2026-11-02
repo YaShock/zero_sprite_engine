@@ -34,6 +34,7 @@ BALL_MAX_SPEED :: 760
 BALL_SPEEDUP :: 6 // per brick hit
 MAX_BOUNCE_ANGLE :: math.PI / 3
 PHYSICS_SUBSTEPS :: 4
+BALL_LIGHT_INTENSITY :: 0.9
 
 LIVES :: 3
 
@@ -80,7 +81,7 @@ Brick :: struct {
 
 Game :: struct {
 	state:       GameState,
-	background:  int,
+	ball_light:  int,
 	paddle:      int,
 	ball:        int,
 	score_text:  int,
@@ -103,7 +104,13 @@ create_level :: proc() {
 	game.ball_speed = BALL_SPEED
 	game.last_mouse = eng.mouse_position()
 
-	game.background = eng.add_entity(
+	// Cool ambient, a soft key light from the top left, and the ball glowing warm.
+	eng.clear_lights()
+	eng.set_ambient(AMBIENT_BLUE, 0.3)
+	eng.add_light({kind = .Directional, pos = {-0.6, -0.8}, height = 0.9, color = KEY_LIGHT, intensity = 0.8})
+	game.ball_light = eng.add_light({kind = .Point, height = 90, color = BALL_GLOW, intensity = BALL_LIGHT_INTENSITY, radius = 360})
+
+	eng.add_entity(
 		wall_background_look(),
 		{SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2},
 		{SCREEN_WIDTH, SCREEN_HEIGHT},
@@ -366,7 +373,9 @@ on_update :: proc(dt: f32) {
 	}
 
 	eng.set_param(game.ball, "velocity", game.ball_vel)
-	eng.set_param(game.background, "light", ball.pos)
+	light := eng.get_light(game.ball_light)
+	light.pos = ball.pos
+	light.intensity = BALL_LIGHT_INTENSITY if ball.visible else 0
 }
 
 main :: proc() {

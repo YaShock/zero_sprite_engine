@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import rl "vendor:raylib"
@@ -28,12 +29,18 @@ ShaderEntry :: struct {
 	loc_extent: i32,
 	loc_origin: i32,
 	loc_params: i32,
+	// Scene lights (only in shaders using vfx.lit_scene; -1 otherwise)
+	loc_light_count: i32,
+	loc_light_pos:   i32,
+	loc_light_color: i32,
+	loc_ambient:     i32,
+	lights_frame:    int, // last frame the lights were uploaded to this shader
 }
 
 @(private)
 ShaderCache :: struct {
-	by_source: map[string]int, // keys are owned by the entries' programs
-	entries:   [dynamic]ShaderEntry,
+	by_key:  map[u64]int, // vfx.Layout.key -> index into entries
+	entries: [dynamic]ShaderEntry,
 }
 
 @(private)
@@ -59,23 +66,32 @@ precompile :: proc(look: vfx.Expr, loc := #caller_location) {
 
 // Like make_material, but reports a shader the driver rejects instead of panicking. `err`
 // holds the numbered source and the driver's log, allocated with the temp allocator.
+//
+// Looks whose structure was seen before only need their layout (a hash and the parameter
+// values); GLSL is generated only for new structures.
 try_make_material :: proc(look: vfx.Expr, label := "") -> (m: Material, err: string, ok: bool) {
 	profile_scope("material")
-	prog := vfx.compile(look, context.temp_allocator)
 	profiler.materials += 1
-	idx, found := shader_cache.by_source[prog.source]
+	layout := vfx.layout(look)
+	idx, found := shader_cache.by_key[layout.key]
 	if !found {
+		prog := vfx.compile(look, context.temp_allocator)
+		assert(slice.equal(prog.defaults, layout.defaults), "vfx: layout() disagrees with compile() on the parameter slots")
 		loaded: bool
 		idx, err, loaded = load_shader(prog, label)
 		if !loaded {
+			delete(layout.defaults)
 			return {}, err, false
 		}
+		shader_cache.by_key[layout.key] = idx
 	}
-	params := make([]f32, len(prog.defaults))
-	copy(params, prog.defaults)
-	return Material{shader = idx, params = params}, "", true
+	return Material{shader = idx, params = layout.defaults}, "", true
 
 	load_shader :: proc(temp: vfx.Program, label: string) -> (idx: int, err: string, ok: bool) {
+		// Compiled at startup from the manifest: no driver work now.
+		if shader, warm := take_warm_shader(temp.source); warm {
+			return add_shader_entry(shader, temp, label), "", true
+		}
 		profile_scope("shader compile")
 		start := time.tick_now()
 		defer {
@@ -96,32 +112,44 @@ try_make_material :: proc(look: vfx.Expr, label := "") -> (m: Material, err: str
 			fmt.sbprintf(&sb, "\n%s", log)
 			return -1, strings.to_string(sb), false
 		}
-		shader := rl.LoadShaderFromMemory(nil, strings.clone_to_cstring(temp.source, context.temp_allocator))
-		if !rl.IsShaderValid(shader) || shader.id == rlGetShaderIdDefault() {
+		shader, loaded := load_glsl(temp.source)
+		if !loaded {
 			return -1, "raylib failed to load a shader the driver compiled", false
 		}
-
-		prog := vfx.clone_program(temp)
-		append(
-			&shader_cache.entries,
-			ShaderEntry {
-				shader = shader,
-				program = prog,
-				label = strings.clone(label),
-				loc_time = rl.GetShaderLocation(shader, "u_time"),
-				loc_age = rl.GetShaderLocation(shader, "u_age"),
-				loc_px = rl.GetShaderLocation(shader, "u_px"),
-				loc_rot = rl.GetShaderLocation(shader, "u_rot"),
-				loc_size = rl.GetShaderLocation(shader, "u_size"),
-				loc_extent = rl.GetShaderLocation(shader, "u_extent"),
-				loc_origin = rl.GetShaderLocation(shader, "u_origin"),
-				loc_params = rl.GetShaderLocation(shader, "u_p"),
-			},
-		)
-		idx = len(shader_cache.entries) - 1
-		shader_cache.by_source[prog.source] = idx
-		return idx, "", true
+		return add_shader_entry(shader, temp, label), "", true
 	}
+}
+
+@(private)
+load_glsl :: proc(source: string) -> (rl.Shader, bool) {
+	shader := rl.LoadShaderFromMemory(nil, strings.clone_to_cstring(source, context.temp_allocator))
+	return shader, rl.IsShaderValid(shader) && shader.id != rlGetShaderIdDefault()
+}
+
+@(private)
+add_shader_entry :: proc(shader: rl.Shader, temp: vfx.Program, label: string) -> int {
+	append(
+		&shader_cache.entries,
+		ShaderEntry {
+			shader = shader,
+			program = vfx.clone_program(temp),
+			label = strings.clone(label),
+			loc_time = rl.GetShaderLocation(shader, "u_time"),
+			loc_age = rl.GetShaderLocation(shader, "u_age"),
+			loc_px = rl.GetShaderLocation(shader, "u_px"),
+			loc_rot = rl.GetShaderLocation(shader, "u_rot"),
+			loc_size = rl.GetShaderLocation(shader, "u_size"),
+			loc_extent = rl.GetShaderLocation(shader, "u_extent"),
+			loc_origin = rl.GetShaderLocation(shader, "u_origin"),
+			loc_params = rl.GetShaderLocation(shader, "u_p"),
+			loc_light_count = rl.GetShaderLocation(shader, "u_light_count"),
+			loc_light_pos = rl.GetShaderLocation(shader, "u_light_pos"),
+			loc_light_color = rl.GetShaderLocation(shader, "u_light_color"),
+			loc_ambient = rl.GetShaderLocation(shader, "u_ambient"),
+			lights_frame = -1,
+		},
+	)
+	return len(shader_cache.entries) - 1
 }
 
 delete_material :: proc(m: Material) {
@@ -177,7 +205,7 @@ unload_materials :: proc() {
 		delete(e.label)
 	}
 	delete(shader_cache.entries)
-	delete(shader_cache.by_source)
+	delete(shader_cache.by_key)
 }
 
 @(private)
@@ -298,6 +326,15 @@ draw_quad :: proc(m: ^Material, center, size: Vector2, pad, quad_scale, px, age,
 	rl.SetShaderValue(sh, entry.loc_origin, &origin, .VEC2)
 	if len(m.params) > 0 {
 		rl.SetShaderValueV(sh, entry.loc_params, &m.params[0], .VEC4, i32(len(m.params) / 4))
+	}
+	// Uniforms persist in the shader, so the lights are uploaded once per frame per shader.
+	if entry.loc_light_count >= 0 && entry.lights_frame != engine.frame {
+		entry.lights_frame = engine.frame
+		l := light_uniforms()
+		rl.SetShaderValue(sh, entry.loc_light_count, &l.count, .INT)
+		rl.SetShaderValueV(sh, entry.loc_light_pos, &l.pos[0], .VEC4, MAX_LIGHTS)
+		rl.SetShaderValueV(sh, entry.loc_light_color, &l.color[0], .VEC4, MAX_LIGHTS)
+		rl.SetShaderValue(sh, entry.loc_ambient, &l.ambient, .VEC3)
 	}
 
 	// The default 1x1 white texture just carries texture coordinates across the quad.

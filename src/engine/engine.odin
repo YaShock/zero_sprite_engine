@@ -30,6 +30,9 @@ InitOptions :: struct {
 	show_fps:      bool,
 	resizable:     bool,
 	match_window:  bool, // virtual resolution follows the window at 1:1 (for tools)
+	// Don't remember compiled shaders across runs (see shader_manifest.odin); for tools that
+	// compile many throwaway shaders.
+	no_shader_manifest: bool,
 }
 
 @(private)
@@ -53,6 +56,7 @@ Engine :: struct {
 	viewport:      Viewport,
 	match_window:  bool,
 	overlay:       proc(),
+	frame:         int, // frames rendered so far
 }
 
 // Frame timing gathered while VSync.Auto decides whether vsync holds the game back.
@@ -77,6 +81,7 @@ init_context :: proc(init: InitOptions) {
 		match_window = init.match_window,
 	}
 	init_scene(init.num_layers)
+	init_lighting()
 
 	engine.frame_budget = 1 / f64(init.fps) if init.fps > 0 else 0
 	engine.vsync = init.vsync
@@ -94,6 +99,9 @@ init_context :: proc(init: InitOptions) {
 	rl.SetExitKey(.KEY_NULL)
 	init_gpu()
 	init_profiler(init.title)
+	if !init.no_shader_manifest {
+		load_shader_manifest(init.title)
+	}
 	update_viewport()
 }
 
@@ -225,6 +233,7 @@ run :: proc(on_update: proc(delta_time: f32)) {
 	context.temp_allocator = counting_allocator(&profiler.temp)
 
 	for !rl.WindowShouldClose() && !profiler_should_quit() {
+		engine.frame += 1
 		profiler_begin_frame()
 		dt := rl.GetFrameTime() * engine.time_scale
 		engine.time += f64(dt)
@@ -286,7 +295,9 @@ run :: proc(on_update: proc(delta_time: f32)) {
 	if profiler.report_on_exit {
 		write_report()
 	}
+	write_shader_manifest()
 	clear_scene()
 	unload_materials()
+	unload_shader_manifest()
 	rl.CloseWindow()
 }

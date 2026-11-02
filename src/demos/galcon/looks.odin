@@ -65,7 +65,7 @@ space_look :: proc(nebula_a, nebula_b: rl.Color, sun: [2]f32, seed: f32) -> ^fx.
 	)
 }
 
-// Lumpy cratered rock; `light` is the light direction in the rock's own (rotating) frame.
+// Lumpy cratered rock, lit by the scene lights (the sun) whichever way it spins.
 asteroid_look :: proc(radius, seed: f32) -> ^fx.Node {
 	p := fx.coord()
 	q := fx.add(p, seed * 17.3)
@@ -75,8 +75,7 @@ asteroid_look :: proc(radius, seed: f32) -> ^fx.Node {
 	color := fx.mix(ASTEROID_DARK, ASTEROID_ROCK, fx.fbm(fx.mul(q, 0.15), 3))
 	color = fx.shade(color, fx.sub(1, fx.mul(craters, 0.35)))
 	height := fx.sub(fx.mul(bevel(d, radius * 0.8), radius * 0.6), fx.mul(craters, radius * 0.15))
-	light := fx.param("light", [2]f32{-0.6, -0.8})
-	return fx.mask(fx.lit(color, height, {specular = 0.1, direction = light}), fx.fill(d))
+	return fx.mask(fx.lit_scene(color, height, {specular = 0.1}), fx.fill(d))
 }
 
 // A torn metal plate with a glinting edge.
@@ -84,8 +83,7 @@ debris_look :: proc(seed: f32) -> ^fx.Node {
 	p := fx.coord()
 	d := fx.sd_convex_polygon(p, {{-5, -3}, {4, -4}, {6, 1}, {1, 4}, {-6, 2}})
 	plate := fx.shade(DEBRIS_METAL, fx.add(0.7, fx.mul(fx.noise(fx.mul(fx.add(p, seed), [2]f32{0.2, 1.4})), 0.4)))
-	light := fx.param("light", [2]f32{-0.6, -0.8})
-	return fx.mask(fx.lit(plate, fx.mul(bevel(d, 1.5), 1.5), {specular = 1.2, shininess = 20, direction = light}), fx.fill(d))
+	return fx.mask(fx.lit_scene(plate, fx.mul(bevel(d, 1.5), 1.5), {specular = 1.2, shininess = 20}), fx.fill(d))
 }
 
 // Icy head with a long tail trailing along -x; the entity is rotated to its flight direction.

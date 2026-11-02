@@ -1149,6 +1149,11 @@ BUILTINS := [?]Builtin {
 			need(c, a[5], "direction", V2) or_return
 			return lit(to_expr(a[0]), to_expr(a[1]), {strength = to_expr(a[2]), specular = to_expr(a[3]), shininess = to_expr(a[4]), direction = to_expr(a[5]), step = to_expr(a[6])}), true
 		}},
+	{"lit_scene", {"color", "height", "strength", "specular", "shininess", "step"}, 2, false, "light a color as a surface with relief, by the scene's lights", proc(c: ^Call, a: []Value) -> (result: Value, ok: bool) {
+			need(c, a[0], "color", COLOR) or_return
+			need(c, a[1], "height", NUM) or_return
+			return lit_scene(to_expr(a[0]), to_expr(a[1]), {strength = to_expr(a[2]), specular = to_expr(a[3]), shininess = to_expr(a[4]), step = to_expr(a[5])}), true
+		}},
 	// Effects
 	{"shatter", {"look", "progress", "impact", "seed", "speed", "gravity", "spin", "cols", "rows"}, 1, false, "break a look into flying shards", proc(c: ^Call, a: []Value) -> (v: Value, ok: bool) {
 			need(c, a[0], "look", COLOR) or_return

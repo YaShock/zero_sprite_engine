@@ -135,6 +135,31 @@ vec4 light(vec4 color, vec2 slope, float specular, float shininess, vec2 dir) {
 	return vec4(color.rgb * (0.25 + 0.75 * diffuse) + spec, color.a);
 }
 
+// Lambert + Blinn-Phong under the scene lights plus ambient. `slope` is the height field's
+// gradient in the object's own frame (rotated into the world here) and `world` the pixel's
+// world position.
+vec4 scene_light(vec4 color, vec2 slope, float specular, float shininess, vec2 world) {
+	vec3 n = normalize(vec3(-rot2(slope, u_rot), 1.0));
+	vec3 total = u_ambient * color.rgb;
+	for (int i = 0; i < u_light_count; i++) {
+		vec4 pos = u_light_pos[i];
+		vec4 col = u_light_color[i];
+		vec3 l = normalize(pos.xyz);
+		float falloff = 1.0;
+		if (pos.w > 0.5) {
+			vec3 to_light = vec3(pos.xy - world, pos.z);
+			l = normalize(to_light);
+			float k = clamp(1.0 - dot(to_light.xy, to_light.xy) / (col.a * col.a), 0.0, 1.0);
+			falloff = k * k;
+		}
+		float diffuse = max(dot(n, l), 0.0);
+		vec3 hv = normalize(l + vec3(0.0, 0.0, 1.0));
+		float spec = specular * pow(max(dot(n, hv), 0.0), shininess);
+		total += (color.rgb * diffuse + spec) * col.rgb * falloff;
+	}
+	return vec4(total, color.a);
+}
+
 // A burst of glowing streaks on ballistic paths, `t` seconds after emission from `origin`.
 // Each particle gets its own direction within `spread` of `dir`, speed and lifetime.
 vec4 sparks(vec2 p, float t, vec2 origin, float dir, float spread, float speed, float grav,

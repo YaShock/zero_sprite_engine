@@ -32,7 +32,22 @@ odin run src/tools/editor
 odin run src/tools/editor -- --check
 ```
 
+Run headlessly (virtual X display, no window on the desktop; GLVND still picks the real GPU driver, but presenting through Xvfb copies every frame back to system memory, so frame rates and CPU usage there are not representative):
+```
+env -u WAYLAND_DISPLAY nix shell nixpkgs#xvfb-run -c xvfb-run -a -s '-screen 0 1600x900x24' odin run src/demos/breakout
+```
+If Xvfb isn't ready in time, raylib fails to open the window and the program exits at once (exit code 0, no frames, no profiler report); just run it again.
+
+Benchmark every demo (20 s each, headless; reports go to `profiles/bench/<label>/`):
+```
+src/tools/benchmark.sh <label>
+```
+
 The OLS language server is configured via `ols.json` at the repo root.
+
+## Changelog
+
+`CHANGELOG.md` must be updated before each commit: add an entry for the commit with the profiler results, measured as described at the top of that file (run `src/tools/benchmark.sh` for the previous commit, from a `git worktree`, and for the new code, alternately, twice each, in one session) and compared with the previous entry. If the results show an unacceptable performance degradation, don't add the entry or commit; fix the regression first, or ask the user whether the cost is acceptable. Title the entry with the commit's subject (a commit can't contain its own hash); add the hash to that heading when writing the next entry, as in `<hash> — <subject>`.
 
 ## Architecture
 
@@ -43,7 +58,8 @@ Guiding principles: everything visible except text is a shader-computed visual e
 A "look" is an expression tree of `^vfx.Node` built with constructors in `node.odin` (`coord`, `world`, `uv`, `time`, `age`, `param`, arithmetic, `fbm`, `voronoi`, `sd_box`, `fill`, `glow`, `lit`, `stack`, `shatter`, `sparks`, ...). `vfx.Expr` is a union that also accepts plain `f32`, `[2]f32`, `[4]f32` and `rl.Color`, so constants can be passed directly.
 
 - Every node is a pure function of the local coordinate `p` (object space, origin at the entity center, virtual units, y down). `codegen.odin` emits each node as a GLSL function `T n<id>(vec2 p)`, so subtrees can be re-evaluated at other positions (`at`, `lit` finite differences, `shatter`).
-- Every numeric leaf becomes a slot in `uniform vec4 u_p[]` (packed four per vec4, since drivers may pad each element of a float array to a full register); only tree *structure* (plus compile-time ints such as fbm octaves or shard grid size) is baked into the shader. The generated source is the shader cache key, so e.g. all bricks of one kind share one shader and differ only in parameter values.
+- Every numeric leaf becomes a slot in `uniform vec4 u_p[]` (packed four per vec4, since drivers may pad each element of a float array to a full register); only tree *structure* (plus compile-time ints such as fbm octaves or shard grid size) is baked into the shader, so e.g. all bricks of one kind share one shader and differ only in parameter values.
+- The shader cache is keyed by `vfx.layout(look)`: a hash of the structure that walks the tree exactly like `emit` (children first, shared nodes once, ids in emission order) and also collects the parameter slots' initial values. GLSL is generated only for structures not seen yet. Anything that changes the generated code (a new `Node` field, op-specific data) must also be fed into `walk` in `codegen.odin`; on a cache miss `try_make_material` asserts that `layout` and `compile` agree on the slots.
 - `vfx.param(name, default)` creates a named slot that game code changes at runtime with `eng.set_param(id, name, value)`.
 - Nodes are allocated with `context.temp_allocator`; trees are transient and freed at the end of the frame.
 - The GLSL library lives in `vfx/glsl/`: `header.glsl` (inputs and uniforms; `compile` appends the per-look `uniform vec4 u_p[N]`) and `prelude.glsl` (noise, SDF, lighting and particle helpers that generated code calls by name). `glsl.odin` embeds them with `#load`, so the binary has no runtime file dependency; renaming a helper means updating `codegen.odin` too. `editor --check` compiles the library on its own before the presets. Format strings passed to `fmt.sbprintf` in `codegen.odin` must escape braces as `{{`/`}}`.
@@ -51,6 +67,8 @@ A "look" is an expression tree of `^vfx.Node` built with constructors in `node.o
 - Every constructor takes `loc := #caller_location` and tags its node with the calling procedure (`Node.origin`), so a look's root names the function that built it; the profiler uses this to label looks.
 
 Adding a node: add an `Op`, a constructor in `node.odin` (with the `loc` parameter, returning through `origin`), its case in `emit` in `codegen.odin`, and, to expose it to look scripts, an entry in `BUILTINS` in `script.odin`.
+
+**Lighting**: `lit(color, height, light)` shades a height field from one fixed direction per look; `lit_scene(color, height, light)` uses the engine's scene lights instead (see below), with the pixel's world position and the entity's rotation applied, and counts as animated (never cached).
 
 **Look scripts** (`script.odin`): a small text language mapping 1:1 onto the constructors (`let`, `param NAME = V in [MIN, MAX] animate PERIOD`, `size`, `pad`, `lifetime`, operators with constant folding, swizzles, named arguments). `parse_script` type-checks arguments so most mistakes are reported with line/column instead of producing bad GLSL.
 
@@ -66,6 +84,10 @@ Single global scene (`scene` in `entity.odin`, `engine` in `engine.odin`); all p
 
 `gpu.odin` binds the few rlgl symbols it needs directly from `system:raylib` (because `vendor:raylib/rlgl` links a bundled static library that the Nix raylib does not provide) and loads OpenGL through the system GLFW that raylib uses, for timer queries and for compiling generated shaders to get the driver's error log. `try_make_material` reports a rejected shader instead of panicking; `draw_material_at` draws a material outside the scene (tool previews). `set_overlay` adds a per-frame draw callback in virtual coordinates; `InitOptions.match_window` makes the virtual resolution follow the window (tools).
 
+**Scene lights** (`lights.odin`): up to `MAX_LIGHTS` (8, matching `glsl/header.glsl`) point or directional lights plus an ambient color, for looks built with `vfx.lit_scene`: `add_light` returns an id, `get_light(id)` to move/recolor, `remove_light`, `clear_lights`, `set_ambient`. The engine starts with ambient 0.25 plus a key light equivalent to `lit`'s default, so switching a look to `lit_scene` keeps its appearance; games usually `clear_lights()` and set up their own. Light uniforms are packed once per frame and uploaded to each shader that uses them once per frame (`ShaderEntry.lights_frame`). Breakout's ball and Galcon's sun are scene lights.
+
+**Shader manifest** (`shader_manifest.odin`): every shader a game compiles is recorded in `.shader-cache/<title>.shaders` (gitignored) and compiled again at the next startup, before the first frame, so effects first seen mid-game in an earlier run don't stall later runs. Entries are matched by full generated source, so a stale manifest costs only startup time; entries unused for 5 runs are dropped. `InitOptions.no_shader_manifest` turns it off (the editor does). `precompile()` is still useful for the first run.
+
 **Profiler** (`profiler.odin`): CPU zones form a call tree keyed by (name, parent); the engine times `update`/`render`/`present`/`cleanup` and game code adds `eng.profile_scope("name")`. GPU time per look comes from timestamp queries around each material draw, read back a few frames later. Shader compile time and startup are tracked separately from per-frame averages. Tool UIs and the profiler overlay are drawn with plain raylib primitives, not vfx, so they stay cheap and don't distort what is measured.
 
 ### Tools (`src/tools/`)
@@ -78,4 +100,5 @@ Each demo is a self-contained `package main` importing `eng "../../engine"` and 
 
 - `breakout/`: bricks, wall background, paddle, ball, explosions.
 - `tower_defense/`: randomized terrain and road (`terrain_look`), walking golems whose animation, facing, health and status effects are params (`enemy_look`), three towers with level-driven looks, projectiles, shard deaths; balance tables live in `data.odin`.
+- `stress/`: performance test, not a game. Deterministic (fixed seed, no input, uncapped frame rate) and staged: ~400 still looks from six families, +400 animated ones from eight more, +300 rotating movers under 6 moving scene lights with per-frame param and text updates (y-sorted layer), +120 spawned effects per second, then double the animated and mover load. Each family is its own `*_look` function in two structural variants, so the profiler reports it on its own line. After each stage it prints entity count, setup time and frame avg/p99 (`benchmark.sh` keeps that in `<demo>.log`).
 - `galcon/`: Galcon Fusion clone. Space backdrop, drifting asteroids/debris/comets, planets as rotating lit globes (`sphere` + `planet_surface` per kind, randomized palettes), owner rings and selection driven by params; bot AI lives in `bots.odin`.

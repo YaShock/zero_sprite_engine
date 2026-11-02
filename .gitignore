@@ -1,3 +1,4 @@
 .vscode/
 flake.lock
 profiles/
+.shader-cache/

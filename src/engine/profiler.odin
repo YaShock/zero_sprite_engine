@@ -425,6 +425,9 @@ verdict :: proc() -> (text: string, color: rl.Color) {
 		return fmt.tprintf("GPU-bound: %.1f ms shading per %.1f ms frame", gpu, frame), {255, 120, 90, 255}
 	case cpu > 0.75 * frame:
 		return fmt.tprintf("CPU-bound: %.1f ms work per %.1f ms frame", cpu, frame), {255, 120, 90, 255}
+	case engine.frame_budget == 0 && !engine.vsync_on && zone_avg("present") > 0.5 * frame:
+		// Nothing caps the frame rate, yet most of the frame goes into the buffer swap.
+		return fmt.tprintf("Present-bound: %.1f ms of a %.1f ms frame in the buffer swap (driver/compositor)", zone_avg("present"), frame), {255, 120, 90, 255}
 	}
 	return fmt.tprintf("Headroom: CPU %.0f%%, GPU %.0f%% of frame (vsync/FPS cap)", cpu / frame * 100, gpu / frame * 100), {140, 230, 140, 255}
 }
@@ -685,6 +688,13 @@ write_report :: proc() {
 	w(&sb, "  entities now %d, peak %d\n", len(scene.entities), profiler.max_entities)
 	w(&sb, "\nSHADERS\n")
 	w(&sb, "  startup (init to first frame) %.0f ms\n", profiler.startup_ms)
+	if n := len(manifest.warm); n > 0 {
+		used := 0
+		for s in manifest.warm {
+			used += 1 if s.taken else 0
+		}
+		w(&sb, "  %d shaders compiled ahead from the shader manifest in %.0f ms, %d of them used\n", n, manifest.ms, used)
+	}
 	w(&sb, "  %d materials made, %d distinct shaders compiled in %.0f ms (slowest %.0f ms)\n", profiler.materials, profiler.compiles, profiler.compile_ms, profiler.compile_max_ms)
 	if len(profiler.late_compiles) > 0 {
 		w(&sb, "  compiled mid-game, each a hitch; precompile() these at load time:\n")
