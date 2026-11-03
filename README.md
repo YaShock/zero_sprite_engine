@@ -75,8 +75,8 @@ Engine enhancements proposed so far, roughly in order of value for effort. Each 
     - A cheaper `lit` option using screen-space derivatives (one height evaluation instead of four)
     - Render expensive layers such as backgrounds at reduced resolution
 - Draw calls
-    - Group entities by shader within a layer where they don't overlap, so mixed layers batch too (the stress test still needs 1,006 calls for 1,860 entities)
-    - Read the parameters that are equal across a draw call from uniforms instead of the instance block, for large heavy looks (Breakout's wall costs 18% more per pixel since instancing)
+    - Let additive looks pass over each other when grouping draws (additive blending commutes, up to rounding), so overlapping effects batch too
+    - Find out why large heavy looks cost more per pixel since instancing (Breakout's wall +18%): reading the parameters from uniforms instead of the instance block recovers only about 4%, so most of it lies elsewhere (e.g. size, rotation and age as flat varyings, or the shared vertex shader)
 - Particles
     - CPU-simulated particles (velocity, drag, gravity, lifetime, collisions) drawn with instancing
     - GPU particle simulation with transform feedback, colliding with any look's distance field

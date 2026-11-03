@@ -208,39 +208,46 @@ remove_expired_entities :: proc() {
 
 @(private)
 render_entities :: proc() {
-	for layer in scene.layers {
-		ids := layer.entity_ids[:]
-		if layer.y_sorted {
-			ids = slice.clone(ids, context.temp_allocator)
-			slice.sort_by(ids, proc(a, b: int) -> bool {
-				ea, eb := &scene.entities[a], &scene.entities[b]
-				return ea.pos.y + ea.size.y / 2 < eb.pos.y + eb.size.y / 2
-			})
-		}
-		for id in ids {
-			e := &scene.entities[id]
-			if !e.visible {
-				continue
+	{
+		profile_scope("batch")
+		begin_batching(&scene_batcher)
+		for layer in scene.layers {
+			ids := layer.entity_ids[:]
+			if layer.y_sorted {
+				ids = slice.clone(ids, context.temp_allocator)
+				slice.sort_by(ids, proc(a, b: int) -> bool {
+					ea, eb := &scene.entities[a], &scene.entities[b]
+					return ea.pos.y + ea.size.y / 2 < eb.pos.y + eb.size.y / 2
+				})
 			}
-			assert(e.drawable != nil, "Entity drawable cannot be nil!")
-			switch &d in e.drawable {
-			case Material:
-				draw_material(&scene_draws, e, &d)
-			case Text:
-				append(&scene_draws.steps, RaylibDraw{id})
+			for id in ids {
+				e := &scene.entities[id]
+				if !e.visible {
+					continue
+				}
+				assert(e.drawable != nil, "Entity drawable cannot be nil!")
+				batch_entity(&scene_batcher, e)
 			}
 		}
+		emit_batches(&scene_batcher, &scene_draws)
 	}
 	submit_draws(&scene_draws)
 }
 
 @(private)
 draw_text :: proc(e: ^Entity, t: Text) {
-	font := rl.GetFontDefault()
+	pos, _ := text_rect(e, t)
 	text := strings.clone_to_cstring(t.text, context.temp_allocator)
-	spacing := t.font_size / 10
-	dims := rl.MeasureTextEx(font, text, t.font_size, spacing)
-	pos := e.pos - {0, dims.y / 2}
+	rl.DrawTextEx(rl.GetFontDefault(), text, pos, t.font_size, t.font_size / 10, t.color)
+	gpu_timer.dirty = true
+}
+
+// Where raylib draws a text entity: its top left corner and size.
+@(private)
+text_rect :: proc(e: ^Entity, t: Text) -> (pos, dims: Vector2) {
+	text := strings.clone_to_cstring(t.text, context.temp_allocator)
+	dims = rl.MeasureTextEx(rl.GetFontDefault(), text, t.font_size, t.font_size / 10)
+	pos = e.pos - {0, dims.y / 2}
 	switch t.align {
 	case .Left:
 	case .Center:
@@ -248,6 +255,5 @@ draw_text :: proc(e: ^Entity, t: Text) {
 	case .Right:
 		pos.x -= dims.x
 	}
-	rl.DrawTextEx(font, text, pos, t.font_size, spacing, t.color)
-	gpu_timer.dirty = true
+	return
 }

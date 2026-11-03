@@ -10,7 +10,41 @@ Each entry records a commit with the engine's own profiler results, so performan
 
 Hardware for all entries so far: NVIDIA GeForce RTX 3070 Laptop GPU.
 
-## Draw looks with instancing
+## Group draws by look where quads don't overlap
+
+- Before the draw list is built, the scene is grouped: each entity joins the newest group drawing its shader with its blending, i.e. it may be drawn earlier than its place in the scene order, unless something it would then be drawn before overlaps its quad. Only the order of overlapping quads is visible, so mixed layers (and looks spread over several layers) now share draw calls. Overlaps are looked up in a 32×32 grid over the virtual screen.
+- Screenshots at a fixed time step are pixel-identical to 96b76a2 in Breakout, tower defense and Galcon; the stress test differs from it only as much as two runs of either version differ from each other.
+
+| Demo | FPS | Frame ms (median / p99 / worst) | Hitches | GPU ms/frame | CPU | Startup ms | Shaders compiled |
+|---|---|---|---|---|---|---|---|
+| Breakout | 93.5 | 10.57 / 14.62 / 23.28 | 2 | 0.68 | 100% | 56 | 0 (20 from manifest in 29 ms) |
+| Tower defense | 59.3 | 16.73 / 20.46 / 28.89 | 0 | 0.84 | 84% | 74 | 0 (27 from manifest in 42 ms) |
+| Galcon | 59.6 | 16.72 / 18.45 / 30.51 | 0 | 0.58 | 80% | 22 | 0 (7 from manifest in 3 ms) |
+
+Most expensive looks (GPU ms/frame): Breakout: `wall_background_look` 0.38 ms, `brick_look` 0.29 ms; Tower defense: `enemy_look` 0.51 ms, `panel_look` 0.15 ms; Galcon: `space_look` 0.57 ms, `asteroid_look` 0.01 ms.
+
+Compared with 96b76a2, measured alternately in the same session (it measured 0.97, 0.89 and 0.64 ms of GPU time per frame there):
+
+- Draw calls per frame: tower defense 18.2 → 11.9 (trees 6.1 → 2, boulders 3.3 → 2), Galcon 3.5 → 3.4, Breakout unchanged at 13 (its bricks were already consecutive).
+- GPU time per frame in the three games is unchanged within noise: Breakout's 0.97 → 0.68 ms comes with the same 13 draw calls, so it is the GPU's clock, not the change.
+- CPU time in `render` rises slightly in the small demos, the cost of grouping (zone `batch`, which also builds the draw list): Breakout 0.39 → 0.50 ms, tower defense 0.61 → 0.65 ms, Galcon 0.40 → 0.43 ms.
+- All hitches, in both versions, were spent waiting in present (the compositor), not in the game's own work.
+
+Stress test, the average of two runs (96b76a2 in parentheses):
+
+| Stage | Entities | Setup ms | Frame avg ms | Frame p99 ms |
+|---|---|---|---|---|
+| 1. still variety | 400 | 12.9 | 22.3 (22.6) | 25.2 (26.2) |
+| 2. animated | 800 | 10.6 | 25.1 (25.5) | 30.6 (31.1) |
+| 3. movers and lights | 1,160 | 8.1 | 26.8 (26.4) | 32.3 (32.6) |
+| 4. spawn churn (+120 effects/s) | 1,160 | 0 | 27.5 (28.7) | 32.5 (38.2) |
+| 5. double load | 1,860 | 18.7 | 30.4 (30.9) | 35.6 (36.9) |
+
+Over the whole run: 1,023 → 602 draw calls per frame, GPU time per frame 4.40 → 4.05 ms (`brick_look` 1.34 → 1.13 ms), CPU in `render` 3.47 → 3.24 ms, of which grouping takes 1.29 ms. Per family: animated tiles 51 → 20 calls, movers 93 → 27, spawned effects 7.5 → 3.6. Still tiles stay at 62–66 calls: each one's padding overlaps its neighbours', so every row has to be drawn in order. Stage frame times are present-bound on the virtual display (see bfa0220) and change within noise.
+
+Also tried and not adopted: a variant of each look shader reading its parameters from plain uniforms, for draw calls whose instances all have the same values (compiled in the background with `KHR_parallel_shader_compile`), to recover the per-pixel cost of reading parameters from the instance block. With eight Breakout walls holding the load equal, the wall cost 2.61–2.67 ms per frame with the variant and 2.63–2.64 ms without (about 4% less relative to the bricks it doesn't affect), and Galcon's backdrop didn't change, so most of the +18% measured in 96b76a2 must come from elsewhere.
+
+## 96b76a2 — Draw looks with instancing
 
 - Looks are drawn with their own instanced draw calls instead of through raylib: consecutive entities with the same shader and blending share one call, and each entity's position, size, rotation, age and parameter values are a record in a uniform block that one shared vertex shader and the look's fragment shader read.
 - The scene's records are uploaded once per frame; text and cached looks are still drawn by raylib, between the calls, in scene order.

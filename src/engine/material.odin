@@ -209,6 +209,7 @@ unload_materials :: proc() {
 	delete(shader_cache.by_key)
 	delete(scene_draws.records)
 	delete(scene_draws.steps)
+	delete_batcher(&scene_batcher)
 }
 
 @(private)
@@ -277,8 +278,8 @@ get_param :: proc(id: int, name: string) -> f32 {
 
 // Draws collected before any is issued, so that all their instance records reach the GPU
 // in one upload (see upload_instances). Consecutive instances of one shader with the same
-// blending share an instanced draw call; whatever raylib draws (text, cached looks) goes
-// between calls in scene order.
+// blending share an instanced draw call (the scene is grouped into such runs first, see
+// batching.odin); whatever raylib draws (text, cached looks) goes between calls.
 @(private)
 DrawList :: struct {
 	records: [dynamic][4]f32, // instance records, see vfx/glsl/vertex.glsl
@@ -309,16 +310,6 @@ RaylibDraw :: struct {
 
 @(private)
 scene_draws: DrawList
-
-@(private)
-draw_material :: proc(list: ^DrawList, e: ^Entity, m: ^Material) {
-	if e.cache.enabled && e.cache.texture.id != 0 {
-		append(&list.steps, RaylibDraw{e.id})
-		return
-	}
-	px := 1 / engine.viewport.scale
-	add_instance(list, m, e.pos, e.size, e.pad, 1, px, f32(engine.time - e.spawn_time), e.rotation, e.blend, e.pos)
-}
 
 // Draws a material outside the scene, e.g. a preview in a tool. `zoom` scales it on screen
 // without changing its logical size; `world_center` is what world() reads at its center
