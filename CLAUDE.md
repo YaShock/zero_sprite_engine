@@ -52,6 +52,10 @@ The OLS language server is configured via `ols.json` at the repo root.
 
 `CHANGELOG.md` must be updated before each commit: add an entry for the commit with the profiler results, measured as described at the top of that file (run `src/tools/benchmark.sh` for the previous commit, from a `git worktree`, and for the new code, alternately, twice each, in one session) and compared with the previous entry. If the results show an unacceptable performance degradation, don't add the entry or commit; fix the regression first, or ask the user whether the cost is acceptable. Title the entry with the commit's subject (a commit can't contain its own hash); add the hash to that heading when writing the next entry, as in `<hash> — <subject>`.
 
+## Architecture document
+
+`docs/ARCHITECTURE.md` explains the render path for people, with diagrams in `docs/diagrams/*.svg` (hand-written SVG, each with light and dark color rules). Every change that affects what it describes (the steps of a frame, how looks are built, cached, compiled or drawn, instance records, uniforms, the shader variants, file or procedure names it cites) must update the text and the diagrams in the same commit. Check an edited diagram by rendering it (`nix shell nixpkgs#librsvg -c rsvg-convert docs/diagrams/<name>.svg -o /tmp/x.png`) and looking at it.
+
 ## Architecture
 
 Guiding principles: everything visible except text is a shader-computed visual effect; effects are composable mathematical functions governed by parameters; demos contain only game logic plus compositions of those functions.

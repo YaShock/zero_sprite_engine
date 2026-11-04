@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -16 1032 382" width="1032" height="382" role="img" aria-label="The instance buffer: call A draws three instances of one look, five vec4s each; after one padding vec4, call B draws another look alone, six vec4s. Call A uses the batched variant, which reads u_inst[v_params + i] with v_params = gl_InstanceID times 5 plus 3. Call B uses the single variant, which reads u_inst[3 + i] at constant indices.">
+<style>
+  .bg { fill: #f3f4f1; }
+  .box { fill: #ffffff; stroke: #cdd2d4; stroke-width: 1.2; }
+  .box-gpu { fill: #ffffff; stroke: #2c5a84; stroke-width: 1.2; }
+  .box-hot { fill: #f6e2cf; stroke: #b55309; stroke-width: 1.4; }
+  .lane-cpu { fill: #e7e9e3; opacity: 0.55; }
+  .lane-gpu { fill: #dce8f2; }
+  .t-title { font-family: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif; font-weight: 600; font-size: 15px; fill: #1c2229; }
+  .t-sub { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; fill: #5a636e; }
+  .t-code { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #1c2229; }
+  .t-code-hot { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #b55309; font-weight: 500; }
+  .t-label { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #5a636e; }
+  .t-label-hot { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #b55309; font-weight: 500; }
+  .t-lane { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #5a636e; }
+  .t-lane-gpu { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #2c5a84; }
+  .t-cell { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; fill: #1c2229; }
+  .t-idx, .t-idx text { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10px; fill: #5a636e; }
+  .ln { stroke: #5a636e; stroke-width: 1.3; fill: none; }
+  .ln-hot { stroke: #b55309; stroke-width: 1.6; fill: none; }
+  .ln-gpu { stroke: #2c5a84; stroke-width: 1.4; fill: none; }
+  .ln-dash { stroke-dasharray: 5 4; }
+  .ah { fill: #5a636e; }
+  .ah-hot { fill: #b55309; }
+  .ah-gpu { fill: #2c5a84; }
+  .cell-head { fill: #e7e9e3; stroke: #cdd2d4; }
+  .cell-param { fill: #f6e2cf; stroke: #b55309; stroke-width: 0.8; }
+  .cell-pad { fill: none; stroke: #cdd2d4; stroke-dasharray: 3 3; }
+  .node { fill: #ffffff; stroke: #cdd2d4; stroke-width: 1.2; }
+  .node-param { fill: #f6e2cf; stroke: #b55309; stroke-width: 1.3; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #14181d; }
+    .box { fill: #1b2027; stroke: #353c45; stroke-width: 1.2; }
+    .box-gpu { fill: #1b2027; stroke: #8fbbe3; stroke-width: 1.2; }
+    .box-hot { fill: #3a2a1c; stroke: #f0943f; stroke-width: 1.4; }
+    .lane-cpu { fill: #212730; opacity: 0.55; }
+    .lane-gpu { fill: #182a3a; }
+    .t-title { font-family: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif; font-weight: 600; font-size: 15px; fill: #e3e6e9; }
+    .t-sub { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; fill: #9aa3ad; }
+    .t-code { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #e3e6e9; }
+    .t-code-hot { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #f0943f; font-weight: 500; }
+    .t-label { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #9aa3ad; }
+    .t-label-hot { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #f0943f; font-weight: 500; }
+    .t-lane { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #9aa3ad; }
+    .t-lane-gpu { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #8fbbe3; }
+    .t-cell { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; fill: #e3e6e9; }
+    .t-idx, .t-idx text { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10px; fill: #9aa3ad; }
+    .ln { stroke: #9aa3ad; stroke-width: 1.3; fill: none; }
+    .ln-hot { stroke: #f0943f; stroke-width: 1.6; fill: none; }
+    .ln-gpu { stroke: #8fbbe3; stroke-width: 1.4; fill: none; }
+    .ah { fill: #9aa3ad; }
+    .ah-hot { fill: #f0943f; }
+    .ah-gpu { fill: #8fbbe3; }
+    .cell-head { fill: #212730; stroke: #353c45; }
+    .cell-param { fill: #3a2a1c; stroke: #f0943f; stroke-width: 0.8; }
+    .cell-pad { fill: none; stroke: #353c45; stroke-dasharray: 3 3; }
+    .node { fill: #1b2027; stroke: #353c45; stroke-width: 1.2; }
+    .node-param { fill: #3a2a1c; stroke: #f0943f; stroke-width: 1.3; }
+  }
+</style>
+<rect class="bg" x="-16" y="-16" width="1032" height="382" rx="12"/>
+<g>
+  <defs>
+    <marker id="f4-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah-hot"/></marker>
+    <marker id="f4-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker>
+  </defs>
+
+  <!-- call brackets -->
+  <polyline class="ln" points="60,48 60,40 660,40 660,48"/>
+  <text class="t-title" x="360" y="30" text-anchor="middle">call A · one look, 3 instances</text>
+  <polyline class="ln" points="700,48 700,40 940,40 940,48"/>
+  <text class="t-title" x="820" y="30" text-anchor="middle">call B · another look, alone</text>
+
+  <text class="t-label" x="160" y="64" text-anchor="middle">instance 0</text>
+  <text class="t-label" x="360" y="64" text-anchor="middle">instance 1</text>
+  <text class="t-label" x="560" y="64" text-anchor="middle">instance 2</text>
+
+  <!-- call A cells: 3 records x (quad shape frame p0 p1) -->
+  <g>
+    <rect class="cell-head" x="60" y="72" width="40" height="40"/><text class="t-cell" x="80" y="96" text-anchor="middle">quad</text>
+    <rect class="cell-head" x="100" y="72" width="40" height="40"/><text class="t-cell" x="120" y="96" text-anchor="middle">shape</text>
+    <rect class="cell-head" x="140" y="72" width="40" height="40"/><text class="t-cell" x="160" y="96" text-anchor="middle">frame</text>
+    <rect class="cell-param" x="180" y="72" width="40" height="40"/><text class="t-cell" x="200" y="96" text-anchor="middle">p0</text>
+    <rect class="cell-param" x="220" y="72" width="40" height="40"/><text class="t-cell" x="240" y="96" text-anchor="middle">p1</text>
+
+    <rect class="cell-head" x="260" y="72" width="40" height="40"/><text class="t-cell" x="280" y="96" text-anchor="middle">quad</text>
+    <rect class="cell-head" x="300" y="72" width="40" height="40"/><text class="t-cell" x="320" y="96" text-anchor="middle">shape</text>
+    <rect class="cell-head" x="340" y="72" width="40" height="40"/><text class="t-cell" x="360" y="96" text-anchor="middle">frame</text>
+    <rect class="cell-param" x="380" y="72" width="40" height="40"/><text class="t-cell" x="400" y="96" text-anchor="middle">p0</text>
+    <rect class="cell-param" x="420" y="72" width="40" height="40"/><text class="t-cell" x="440" y="96" text-anchor="middle">p1</text>
+
+    <rect class="cell-head" x="460" y="72" width="40" height="40"/><text class="t-cell" x="480" y="96" text-anchor="middle">quad</text>
+    <rect class="cell-head" x="500" y="72" width="40" height="40"/><text class="t-cell" x="520" y="96" text-anchor="middle">shape</text>
+    <rect class="cell-head" x="540" y="72" width="40" height="40"/><text class="t-cell" x="560" y="96" text-anchor="middle">frame</text>
+    <rect class="cell-param" x="580" y="72" width="40" height="40"/><text class="t-cell" x="600" y="96" text-anchor="middle">p0</text>
+    <rect class="cell-param" x="620" y="72" width="40" height="40"/><text class="t-cell" x="640" y="96" text-anchor="middle">p1</text>
+  </g>
+  <rect class="cell-pad" x="660" y="72" width="40" height="40"/>
+  <text class="t-idx" x="680" y="96" text-anchor="middle">pad</text>
+  <g>
+    <rect class="cell-head" x="700" y="72" width="40" height="40"/><text class="t-cell" x="720" y="96" text-anchor="middle">quad</text>
+    <rect class="cell-head" x="740" y="72" width="40" height="40"/><text class="t-cell" x="760" y="96" text-anchor="middle">shape</text>
+    <rect class="cell-head" x="780" y="72" width="40" height="40"/><text class="t-cell" x="800" y="96" text-anchor="middle">frame</text>
+    <rect class="cell-param" x="820" y="72" width="40" height="40"/><text class="t-cell" x="840" y="96" text-anchor="middle">p0</text>
+    <rect class="cell-param" x="860" y="72" width="40" height="40"/><text class="t-cell" x="880" y="96" text-anchor="middle">p1</text>
+    <rect class="cell-param" x="900" y="72" width="40" height="40"/><text class="t-cell" x="920" y="96" text-anchor="middle">p2</text>
+  </g>
+
+  <!-- indices within each call's window -->
+  <g class="t-idx">
+    <text x="80" y="128" text-anchor="middle">0</text><text x="120" y="128" text-anchor="middle">1</text><text x="160" y="128" text-anchor="middle">2</text><text x="200" y="128" text-anchor="middle">3</text><text x="240" y="128" text-anchor="middle">4</text>
+    <text x="280" y="128" text-anchor="middle">5</text><text x="320" y="128" text-anchor="middle">6</text><text x="360" y="128" text-anchor="middle">7</text><text x="400" y="128" text-anchor="middle">8</text><text x="440" y="128" text-anchor="middle">9</text>
+    <text x="480" y="128" text-anchor="middle">10</text><text x="520" y="128" text-anchor="middle">11</text><text x="560" y="128" text-anchor="middle">12</text><text x="600" y="128" text-anchor="middle">13</text><text x="640" y="128" text-anchor="middle">14</text>
+    <text x="720" y="128" text-anchor="middle">0</text><text x="760" y="128" text-anchor="middle">1</text><text x="800" y="128" text-anchor="middle">2</text><text x="840" y="128" text-anchor="middle">3</text><text x="880" y="128" text-anchor="middle">4</text><text x="920" y="128" text-anchor="middle">5</text>
+  </g>
+  <text class="t-label" x="20" y="128" text-anchor="start">u_inst</text>
+  <text class="t-label" x="60" y="152">↑ call A's window starts here</text>
+  <text class="t-label" x="700" y="152">↑ call B's window starts here</text>
+
+  <!-- read cards -->
+  <rect class="box-hot" x="60" y="200" width="420" height="132" rx="8"/>
+  <text class="t-title" x="78" y="226">Batched variant · call A</text>
+  <text class="t-code-hot" x="78" y="252">u_p(i) = u_inst[v_params + i]</text>
+  <text class="t-code" x="78" y="274">v_params = gl_InstanceID × 5 + 3</text>
+  <text class="t-sub" x="78" y="300">The offset is known only per instance, so some</text>
+  <text class="t-sub" x="78" y="318">GPUs load every read from memory (Intel: slow).</text>
+
+  <rect class="box" x="520" y="200" width="420" height="132" rx="8"/>
+  <text class="t-title" x="538" y="226">Single variant · call B, and instanced looks</text>
+  <text class="t-code" x="538" y="252">u_p(i) = u_inst[3 + i]</text>
+  <text class="t-code" x="538" y="274">compiled when the material is made</text>
+  <text class="t-sub" x="538" y="300">Constant indices: drivers keep the values in</text>
+  <text class="t-sub" x="538" y="318">registers, as cheap as plain uniforms.</text>
+
+  <line class="ln-hot" x1="300" y1="200" x2="396" y2="116" marker-end="url(#f4-h)"/>
+  <text class="t-label-hot" x="352" y="176">instance 1: index 8</text>
+  <line class="ln" x1="760" y1="200" x2="836" y2="116" marker-end="url(#f4-a)"/>
+  <text class="t-label" x="806" y="176">index 3</text>
+        </g>
+</svg>

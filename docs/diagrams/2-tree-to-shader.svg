@@ -1,0 +1,116 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -16 472 452" width="472" height="452" role="img" aria-label="The tree mask(param tint, fill(sd_circle(coord, param radius))). Its two params take slots 0 to 3 and slot 4, packed into u_p(0) and u_p(1). Each node becomes a local t0 to t5.">
+<style>
+  .bg { fill: #f3f4f1; }
+  .box { fill: #ffffff; stroke: #cdd2d4; stroke-width: 1.2; }
+  .box-gpu { fill: #ffffff; stroke: #2c5a84; stroke-width: 1.2; }
+  .box-hot { fill: #f6e2cf; stroke: #b55309; stroke-width: 1.4; }
+  .lane-cpu { fill: #e7e9e3; opacity: 0.55; }
+  .lane-gpu { fill: #dce8f2; }
+  .t-title { font-family: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif; font-weight: 600; font-size: 15px; fill: #1c2229; }
+  .t-sub { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; fill: #5a636e; }
+  .t-code { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #1c2229; }
+  .t-code-hot { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #b55309; font-weight: 500; }
+  .t-label { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #5a636e; }
+  .t-label-hot { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #b55309; font-weight: 500; }
+  .t-lane { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #5a636e; }
+  .t-lane-gpu { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #2c5a84; }
+  .t-cell { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; fill: #1c2229; }
+  .t-idx, .t-idx text { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10px; fill: #5a636e; }
+  .ln { stroke: #5a636e; stroke-width: 1.3; fill: none; }
+  .ln-hot { stroke: #b55309; stroke-width: 1.6; fill: none; }
+  .ln-gpu { stroke: #2c5a84; stroke-width: 1.4; fill: none; }
+  .ln-dash { stroke-dasharray: 5 4; }
+  .ah { fill: #5a636e; }
+  .ah-hot { fill: #b55309; }
+  .ah-gpu { fill: #2c5a84; }
+  .cell-head { fill: #e7e9e3; stroke: #cdd2d4; }
+  .cell-param { fill: #f6e2cf; stroke: #b55309; stroke-width: 0.8; }
+  .cell-pad { fill: none; stroke: #cdd2d4; stroke-dasharray: 3 3; }
+  .node { fill: #ffffff; stroke: #cdd2d4; stroke-width: 1.2; }
+  .node-param { fill: #f6e2cf; stroke: #b55309; stroke-width: 1.3; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #14181d; }
+    .box { fill: #1b2027; stroke: #353c45; stroke-width: 1.2; }
+    .box-gpu { fill: #1b2027; stroke: #8fbbe3; stroke-width: 1.2; }
+    .box-hot { fill: #3a2a1c; stroke: #f0943f; stroke-width: 1.4; }
+    .lane-cpu { fill: #212730; opacity: 0.55; }
+    .lane-gpu { fill: #182a3a; }
+    .t-title { font-family: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif; font-weight: 600; font-size: 15px; fill: #e3e6e9; }
+    .t-sub { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; fill: #9aa3ad; }
+    .t-code { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #e3e6e9; }
+    .t-code-hot { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #f0943f; font-weight: 500; }
+    .t-label { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #9aa3ad; }
+    .t-label-hot { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #f0943f; font-weight: 500; }
+    .t-lane { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #9aa3ad; }
+    .t-lane-gpu { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #8fbbe3; }
+    .t-cell { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; fill: #e3e6e9; }
+    .t-idx, .t-idx text { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10px; fill: #9aa3ad; }
+    .ln { stroke: #9aa3ad; stroke-width: 1.3; fill: none; }
+    .ln-hot { stroke: #f0943f; stroke-width: 1.6; fill: none; }
+    .ln-gpu { stroke: #8fbbe3; stroke-width: 1.4; fill: none; }
+    .ah { fill: #9aa3ad; }
+    .ah-hot { fill: #f0943f; }
+    .ah-gpu { fill: #8fbbe3; }
+    .cell-head { fill: #212730; stroke: #353c45; }
+    .cell-param { fill: #3a2a1c; stroke: #f0943f; stroke-width: 0.8; }
+    .cell-pad { fill: none; stroke: #353c45; stroke-dasharray: 3 3; }
+    .node { fill: #1b2027; stroke: #353c45; stroke-width: 1.2; }
+    .node-param { fill: #3a2a1c; stroke: #f0943f; stroke-width: 1.3; }
+  }
+</style>
+<rect class="bg" x="-16" y="-16" width="472" height="452" rx="12"/>
+<g>
+    <!-- edges -->
+    <line class="ln" x1="220" y1="54" x2="95" y2="100"/>
+    <line class="ln" x1="220" y1="54" x2="340" y2="100"/>
+    <line class="ln" x1="340" y1="134" x2="340" y2="170"/>
+    <line class="ln" x1="340" y1="204" x2="260" y2="245"/>
+    <line class="ln" x1="340" y1="204" x2="380" y2="245"/>
+    <!-- nodes -->
+    <rect class="node" x="165" y="20" width="110" height="34" rx="6"/>
+    <text class="t-code" x="220" y="41" text-anchor="middle">mask</text>
+    <text class="t-idx" x="159" y="41" text-anchor="end">t5</text>
+
+    <rect class="node-param" x="40" y="100" width="110" height="34" rx="6"/>
+    <text class="t-code" x="95" y="121" text-anchor="middle">param tint</text>
+    <text class="t-idx" x="34" y="121" text-anchor="end">t0</text>
+    <text class="t-label-hot" x="95" y="152" text-anchor="middle">slots 0–3</text>
+
+    <rect class="node" x="290" y="100" width="100" height="34" rx="6"/>
+    <text class="t-code" x="340" y="121" text-anchor="middle">fill</text>
+    <text class="t-idx" x="284" y="121" text-anchor="end">t4</text>
+
+    <rect class="node" x="290" y="170" width="100" height="34" rx="6"/>
+    <text class="t-code" x="340" y="191" text-anchor="middle">sd_circle</text>
+    <text class="t-idx" x="284" y="191" text-anchor="end">t3</text>
+
+    <rect class="node" x="210" y="245" width="100" height="34" rx="6"/>
+    <text class="t-code" x="260" y="266" text-anchor="middle">coord</text>
+    <text class="t-idx" x="204" y="266" text-anchor="end">t1</text>
+
+    <rect class="node-param" x="330" y="245" width="100" height="34" rx="6"/>
+    <text class="t-code" x="380" y="266" text-anchor="middle">param radius</text>
+    <text class="t-idx" x="380" y="297" text-anchor="middle">t2</text>
+    <text class="t-label-hot" x="380" y="312" text-anchor="middle">slot 4</text>
+
+    <!-- the slots -->
+    <text class="t-lane" x="20" y="350">PARAMETER SLOTS (layout.defaults)</text>
+    <text class="t-code" x="20" y="378">u_p(0)</text>
+    <rect class="cell-param" x="80" y="362" width="52" height="24"/>
+    <rect class="cell-param" x="132" y="362" width="52" height="24"/>
+    <rect class="cell-param" x="184" y="362" width="52" height="24"/>
+    <rect class="cell-param" x="236" y="362" width="52" height="24"/>
+    <text class="t-cell" x="106" y="378" text-anchor="middle">1</text>
+    <text class="t-cell" x="158" y="378" text-anchor="middle">0.77</text>
+    <text class="t-cell" x="210" y="378" text-anchor="middle">0.48</text>
+    <text class="t-cell" x="262" y="378" text-anchor="middle">1</text>
+    <text class="t-label" x="298" y="378">tint r g b a</text>
+    <text class="t-code" x="20" y="408">u_p(1)</text>
+    <rect class="cell-param" x="80" y="392" width="52" height="24"/>
+    <rect class="cell-pad" x="132" y="392" width="52" height="24"/>
+    <rect class="cell-pad" x="184" y="392" width="52" height="24"/>
+    <rect class="cell-pad" x="236" y="392" width="52" height="24"/>
+    <text class="t-cell" x="106" y="408" text-anchor="middle">30</text>
+    <text class="t-label" x="298" y="408">radius, padding</text>
+  </g>
+</svg>

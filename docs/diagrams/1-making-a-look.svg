@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-16 -16 1032 332" width="1032" height="332" role="img" aria-label="Making a look: game code builds a node tree; add_entity runs vfx.layout, which hashes the structure and assigns parameter slots; the shader cache is looked up by that key. On a hit the material just copies the default values; on a miss vfx.compile generates GLSL and the program is loaded from the manifest, the program cache or the driver.">
+<style>
+  .bg { fill: #f3f4f1; }
+  .box { fill: #ffffff; stroke: #cdd2d4; stroke-width: 1.2; }
+  .box-gpu { fill: #ffffff; stroke: #2c5a84; stroke-width: 1.2; }
+  .box-hot { fill: #f6e2cf; stroke: #b55309; stroke-width: 1.4; }
+  .lane-cpu { fill: #e7e9e3; opacity: 0.55; }
+  .lane-gpu { fill: #dce8f2; }
+  .t-title { font-family: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif; font-weight: 600; font-size: 15px; fill: #1c2229; }
+  .t-sub { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; fill: #5a636e; }
+  .t-code { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #1c2229; }
+  .t-code-hot { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #b55309; font-weight: 500; }
+  .t-label { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #5a636e; }
+  .t-label-hot { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #b55309; font-weight: 500; }
+  .t-lane { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #5a636e; }
+  .t-lane-gpu { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #2c5a84; }
+  .t-cell { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; fill: #1c2229; }
+  .t-idx, .t-idx text { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10px; fill: #5a636e; }
+  .ln { stroke: #5a636e; stroke-width: 1.3; fill: none; }
+  .ln-hot { stroke: #b55309; stroke-width: 1.6; fill: none; }
+  .ln-gpu { stroke: #2c5a84; stroke-width: 1.4; fill: none; }
+  .ln-dash { stroke-dasharray: 5 4; }
+  .ah { fill: #5a636e; }
+  .ah-hot { fill: #b55309; }
+  .ah-gpu { fill: #2c5a84; }
+  .cell-head { fill: #e7e9e3; stroke: #cdd2d4; }
+  .cell-param { fill: #f6e2cf; stroke: #b55309; stroke-width: 0.8; }
+  .cell-pad { fill: none; stroke: #cdd2d4; stroke-dasharray: 3 3; }
+  .node { fill: #ffffff; stroke: #cdd2d4; stroke-width: 1.2; }
+  .node-param { fill: #f6e2cf; stroke: #b55309; stroke-width: 1.3; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #14181d; }
+    .box { fill: #1b2027; stroke: #353c45; stroke-width: 1.2; }
+    .box-gpu { fill: #1b2027; stroke: #8fbbe3; stroke-width: 1.2; }
+    .box-hot { fill: #3a2a1c; stroke: #f0943f; stroke-width: 1.4; }
+    .lane-cpu { fill: #212730; opacity: 0.55; }
+    .lane-gpu { fill: #182a3a; }
+    .t-title { font-family: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif; font-weight: 600; font-size: 15px; fill: #e3e6e9; }
+    .t-sub { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 12px; fill: #9aa3ad; }
+    .t-code { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #e3e6e9; }
+    .t-code-hot { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; fill: #f0943f; font-weight: 500; }
+    .t-label { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #9aa3ad; }
+    .t-label-hot { font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 11.5px; fill: #f0943f; font-weight: 500; }
+    .t-lane { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #9aa3ad; }
+    .t-lane-gpu { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 11px; letter-spacing: 0.08em; fill: #8fbbe3; }
+    .t-cell { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10.5px; fill: #e3e6e9; }
+    .t-idx, .t-idx text { font-family: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace; font-size: 10px; fill: #9aa3ad; }
+    .ln { stroke: #9aa3ad; stroke-width: 1.3; fill: none; }
+    .ln-hot { stroke: #f0943f; stroke-width: 1.6; fill: none; }
+    .ln-gpu { stroke: #8fbbe3; stroke-width: 1.4; fill: none; }
+    .ah { fill: #9aa3ad; }
+    .ah-hot { fill: #f0943f; }
+    .ah-gpu { fill: #8fbbe3; }
+    .cell-head { fill: #212730; stroke: #353c45; }
+    .cell-param { fill: #3a2a1c; stroke: #f0943f; stroke-width: 0.8; }
+    .cell-pad { fill: none; stroke: #353c45; stroke-dasharray: 3 3; }
+    .node { fill: #1b2027; stroke: #353c45; stroke-width: 1.2; }
+    .node-param { fill: #3a2a1c; stroke: #f0943f; stroke-width: 1.3; }
+  }
+</style>
+<rect class="bg" x="-16" y="-16" width="1032" height="332" rx="12"/>
+<g>
+  <defs>
+    <marker id="f1-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker>
+    <marker id="f1-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="ah-hot"/></marker>
+  </defs>
+
+  <!-- Row 1: the path every entity takes -->
+  <rect class="box" x="20" y="40" width="140" height="74" rx="8"/>
+  <text class="t-title" x="34" y="66">Game code</text>
+  <text class="t-code" x="34" y="88">fx.mask(…)</text>
+  <text class="t-sub" x="34" y="104">looks.odin</text>
+
+  <rect class="box" x="220" y="40" width="130" height="74" rx="8"/>
+  <text class="t-title" x="234" y="66">Look tree</text>
+  <text class="t-code" x="234" y="88">^vfx.Node</text>
+  <text class="t-sub" x="234" y="104">temp memory</text>
+
+  <rect class="box" x="420" y="40" width="140" height="74" rx="8"/>
+  <text class="t-title" x="434" y="66">vfx.layout</text>
+  <text class="t-sub" x="434" y="88">hash the structure</text>
+  <text class="t-sub" x="434" y="104">assign param slots</text>
+
+  <rect class="box" x="620" y="40" width="140" height="74" rx="8"/>
+  <text class="t-title" x="634" y="66">Shader cache</text>
+  <text class="t-code" x="634" y="88">by_key[key]</text>
+  <text class="t-sub" x="634" y="104">seen this shape?</text>
+
+  <rect class="box" x="820" y="40" width="160" height="74" rx="8"/>
+  <text class="t-title" x="834" y="66">Material</text>
+  <text class="t-sub" x="834" y="88">shader index</text>
+  <text class="t-sub" x="834" y="104">its own param values</text>
+
+  <line class="ln" x1="160" y1="77" x2="216" y2="77" marker-end="url(#f1-a)"/>
+  <text class="t-label" x="190" y="70" text-anchor="middle">builds</text>
+  <line class="ln" x1="350" y1="77" x2="416" y2="77" marker-end="url(#f1-a)"/>
+  <text class="t-label" x="384" y="70" text-anchor="middle">add_entity</text>
+  <line class="ln" x1="560" y1="77" x2="616" y2="77" marker-end="url(#f1-a)"/>
+  <text class="t-label" x="590" y="70" text-anchor="middle">key</text>
+  <line class="ln" x1="760" y1="77" x2="816" y2="77" marker-end="url(#f1-a)"/>
+  <text class="t-label" x="790" y="70" text-anchor="middle">hit</text>
+
+  <!-- Row 2: only for a structure not seen before -->
+  <rect class="box-hot" x="620" y="180" width="140" height="100" rx="8"/>
+  <text class="t-title" x="634" y="206">vfx.compile</text>
+  <text class="t-sub" x="634" y="228">GLSL source:</text>
+  <text class="t-sub" x="634" y="246">header, prelude,</text>
+  <text class="t-sub" x="634" y="264">straight-line main</text>
+
+  <rect class="box-hot" x="820" y="180" width="160" height="100" rx="8"/>
+  <text class="t-title" x="834" y="206">Load program</text>
+  <text class="t-sub" x="834" y="228">① shader manifest</text>
+  <text class="t-sub" x="834" y="246">② program cache on disk</text>
+  <text class="t-sub" x="834" y="264">③ driver compile, save</text>
+
+  <line class="ln-hot ln-dash" x1="690" y1="114" x2="690" y2="176" marker-end="url(#f1-h)"/>
+  <text class="t-label-hot" x="700" y="142">miss:</text>
+  <text class="t-label-hot" x="700" y="158">new shape</text>
+  <line class="ln-hot ln-dash" x1="760" y1="230" x2="816" y2="230" marker-end="url(#f1-h)"/>
+  <text class="t-label-hot" x="788" y="222" text-anchor="middle">source</text>
+  <line class="ln-hot ln-dash" x1="900" y1="180" x2="900" y2="118" marker-end="url(#f1-h)"/>
+  <text class="t-label-hot" x="910" y="142">new</text>
+  <text class="t-label-hot" x="910" y="158">ShaderEntry</text>
+
+  <text class="t-label" x="20" y="200">Every brick of one kind has the same tree</text>
+  <text class="t-label" x="20" y="218">shape, so all of them share one shader and</text>
+  <text class="t-label" x="20" y="236">differ only in their parameter values.</text>
+        </g>
+</svg>

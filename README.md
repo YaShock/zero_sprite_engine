@@ -2,6 +2,8 @@
 
 This project aims to make a 2D engine with **purely** procedurally generated content. This means no more sprite sheets and fixed resolution artwork! Every single visible object shall be described as a mathematical formula.
 
+How it works, with diagrams: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Tools
 
 - Profiler
