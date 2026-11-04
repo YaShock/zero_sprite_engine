@@ -2,7 +2,9 @@ package engine
 
 // Built-in profiler. F3 toggles the overlay and F4 writes a report; ZSE_PROFILE=1 starts
 // with the overlay on and writes a report on exit, ZSE_PROFILE_SECONDS=N also quits after
-// N seconds (for repeatable benchmarks).
+// N seconds (for repeatable benchmarks), after a warm-up of 5 s that the report leaves out
+// (ZSE_PROFILE_WARMUP=N changes it). ZSE_PROFILE_OVERLAY=off keeps the overlay hidden while
+// profiling.
 //
 // What it measures:
 // - CPU time per zone: the engine's frame phases plus any profile_scope() in game code
@@ -17,7 +19,6 @@ import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
-import "core:sys/posix"
 import "core:time"
 import rl "vendor:raylib"
 
@@ -102,6 +103,8 @@ Profiler :: struct {
 	overlay:         bool,
 	report_on_exit:  bool,
 	quit_after:      f64,
+	warmup:          f64, // seconds of benchmark warm-up still to run (from session_start)
+	warmed_up:       f64, // seconds of warm-up that ran, for the report
 	title:           string,
 	session_start:   time.Tick,
 	frame_start:     time.Tick,
@@ -169,8 +172,16 @@ init_profiler :: proc(title: string) {
 	}
 	if s := os.get_env("ZSE_PROFILE_SECONDS", context.temp_allocator); s != "" {
 		profiler.quit_after = strconv.parse_f64(s) or_else 0
+		profiler.warmup = 5
+		if w := os.get_env("ZSE_PROFILE_WARMUP", context.temp_allocator); w != "" {
+			profiler.warmup = strconv.parse_f64(w) or_else 0
+		}
 		profiler.report_on_exit = true
 		set_profiling(true)
+	}
+	// Measuring without drawing the overlay, which costs a few tenths of a millisecond a frame
+	if os.get_env("ZSE_PROFILE_OVERLAY", context.temp_allocator) == "off" {
+		profiler.overlay = false
 	}
 }
 
@@ -243,6 +254,9 @@ profiler_begin_frame :: proc() {
 		return
 	}
 
+	if profiler.warmup > 0 && time.duration_seconds(time.tick_diff(profiler.session_start, now)) >= profiler.warmup {
+		discard_warmup(now)
+	}
 	if rl.IsKeyPressed(.F3) {
 		set_profiling(!profiler.overlay)
 	}
@@ -293,9 +307,33 @@ profiler_begin_frame :: proc() {
 	gpu_begin_frame(profiler.active)
 }
 
+// The benchmark's warm-up is over: what was recorded so far (window and mode switches, the
+// first draws of each shader, caches filling) is left out of the report. Rolling averages
+// carry on.
+@(private)
+discard_warmup :: proc(now: time.Tick) {
+	profiler.warmed_up = profiler.warmup
+	profiler.warmup = 0
+	profiler.session_start = now
+	clear(&profiler.frames)
+	clear(&profiler.presents)
+	for &z in profiler.zones {
+		z.total_ms, z.frames, z.max_ms = 0, 0, 0
+	}
+	for &l in profiler.looks {
+		l.total_ms, l.total_draws, l.total_pixels = 0, 0, 0
+	}
+	profiler.total_gpu_ms, profiler.gpu_frames = 0, 0
+	profiler.total_allocs = 0
+	profiler.cpu_sum, profiler.cpu_samples = 0, 0
+	profiler.rss_peak = profiler.rss
+	profiler.max_entities = 0
+	profiler.present_stalls = 0
+}
+
 @(private)
 profiler_should_quit :: proc() -> bool {
-	return profiler.quit_after > 0 && time.duration_seconds(time.tick_diff(profiler.session_start, time.tick_now())) >= profiler.quit_after
+	return profiler.quit_after > 0 && profiler.warmup <= 0 && time.duration_seconds(time.tick_diff(profiler.session_start, time.tick_now())) >= profiler.quit_after
 }
 
 @(private)
@@ -336,37 +374,6 @@ read_gpu_results :: proc() {
 	profiler.gpu_frames += 1
 }
 
-// Resident memory in bytes, from /proc/self/statm (Linux; 0 elsewhere).
-@(private)
-read_rss :: proc() -> int {
-	data, err := os.read_entire_file("/proc/self/statm", context.temp_allocator)
-	if err != nil {
-		return 0
-	}
-	fields := strings.fields(string(data), context.temp_allocator)
-	if len(fields) < 2 {
-		return 0
-	}
-	pages := strconv.parse_int(fields[1]) or_else 0
-	return pages * int(posix.sysconf(._PAGE_SIZE))
-}
-
-// User + system CPU time of the process in clock ticks, from /proc/self/stat.
-@(private)
-read_cpu_ticks :: proc() -> int {
-	data, err := os.read_entire_file("/proc/self/stat", context.temp_allocator)
-	if err != nil {
-		return 0
-	}
-	s := string(data)
-	// Fields after the command name, which is parenthesized and may contain spaces.
-	fields := strings.fields(s[strings.last_index_byte(s, ')') + 1:], context.temp_allocator)
-	if len(fields) < 13 {
-		return 0
-	}
-	return (strconv.parse_int(fields[11]) or_else 0) + (strconv.parse_int(fields[12]) or_else 0)
-}
-
 @(private)
 sample_process :: proc() {
 	now := time.tick_now()
@@ -376,7 +383,7 @@ sample_process :: proc() {
 	}
 	ticks := read_cpu_ticks()
 	if profiler.last_cpu_ticks > 0 {
-		ticks_per_second := f64(posix.sysconf(._CLK_TCK))
+		ticks_per_second := f64(cpu_ticks_per_second())
 		profiler.cpu_percent = f64(ticks - profiler.last_cpu_ticks) / ticks_per_second / elapsed * 100
 		profiler.cpu_sum += profiler.cpu_percent
 		profiler.cpu_samples += 1
@@ -387,11 +394,26 @@ sample_process :: proc() {
 	profiler.rss_peak = max(profiler.rss_peak, profiler.rss)
 }
 
-// Top-level zone's rolling average.
+// The render phase's batch flush, where some drivers wait for the display (see run).
+FLUSH_ZONE :: "flush (may wait for display)"
+// The images drawn before the scene (cached looks, out-of-focus layers): when there are
+// any, they are the frame's first GPU work, and the wait moves there.
+OFFSCREEN_ZONE :: "offscreen (may wait for display)"
+
+// Rolling average of the zone `name` under the top-level zone `parent` ("" = top level).
 @(private)
-zone_avg :: proc(name: string) -> f64 {
+zone_avg :: proc(name: string, parent := "") -> f64 {
+	parent_index := -1
+	if parent != "" {
+		parent_index = -2
+		for z, i in profiler.zones {
+			if z.parent == -1 && z.name == parent {
+				parent_index = i
+			}
+		}
+	}
 	for z in profiler.zones {
-		if z.parent == -1 && z.name == name {
+		if z.parent == parent_index && z.name == name {
 			return z.avg_ms
 		}
 	}
@@ -417,7 +439,7 @@ zone_tree :: proc() -> []int {
 // What limits the frame rate, judged from rolling averages.
 @(private)
 verdict :: proc() -> (text: string, color: rl.Color) {
-	cpu := zone_avg("update") + zone_avg("render") + zone_avg("cleanup")
+	cpu := zone_avg("update") + zone_avg("render") - zone_avg(FLUSH_ZONE, "render") - zone_avg(OFFSCREEN_ZONE, "render") + zone_avg("cleanup")
 	gpu := profiler.avg_gpu_ms
 	frame := max(profiler.avg_frame_ms, 0.001)
 	switch {
@@ -646,7 +668,11 @@ write_report :: proc() {
 
 	w(&sb, "Zero Sprite Engine profile: %s\n", profiler.title)
 	w(&sb, "GPU: %s   window %dx%d\n", gpu_renderer(), rl.GetRenderWidth(), rl.GetRenderHeight())
-	w(&sb, "Duration %.1f s, %d frames\n\n", seconds, frames)
+	w(&sb, "Duration %.1f s, %d frames", seconds, frames)
+	if profiler.warmed_up > 0 {
+		w(&sb, " (after %.0f s of warm-up, not recorded)", profiler.warmed_up)
+	}
+	w(&sb, "\n\n")
 
 	w(&sb, "FRAME TIME (ms)\n")
 	w(&sb, "  average %.2f (%.1f FPS)   1%% low %.1f FPS\n", avg, 1000 / avg, 1000 / (slow_sum / f64(len(slowest))))

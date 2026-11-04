@@ -10,7 +10,53 @@ Each entry records a commit with the engine's own profiler results, so performan
 
 Hardware for all entries so far: NVIDIA GeForce RTX 3070 Laptop GPU.
 
-## Group draws by look where quads don't overlap
+## Merge AlgoGame and Light Room with their engine branch
+
+Merges a branch that diverged at 8b14d71 (developed on Windows) with two new demos, adapting its engine changes to the instanced drawing and structure-keyed shader cache made here since.
+
+- New demos: `algo_game` (an underwater cave flyer) and `light_room` (a 3D tech demo: a room, a flood and an underwater scene, every object ray-traced in its look). Both run under `ZSE_PROFILE_SECONDS` on autoplay, so `benchmark.sh` now runs them too.
+- Looks: `param_array` (values in the instance record), `data_array` (a float texture per material, uploaded only where written), instanced looks (`vfx.instances`: one entity, one quad per record, one draw call, through `vertex_instanced.glsl`), shape lists (`curve`, `sd_capsules`, `sd_capsule_groups`, `glow_points`, `metaballs`) with grid bins (`bins.odin`), `gate`, `int_fbm`, `falloff`, `layer_sample`, and 3D nodes (`march_solid`, `solid_normal`, `point_lights`, `capsule_shadows`, `capsule_occlusion`, `haze_lights`). `InitOptions.bake_constants` writes constants as literals.
+- Code generation: `main` is straight-line code that computes every node once; functions remain only for subtrees evaluated at other positions. `walk` now assigns every parameter slot, and `compile` only looks them up, so the cache key and the generated code can't disagree.
+- Layers: `set_layer_sorted`, `set_layer_resolution` (out-of-focus, optionally blurred, half-float), `set_layer_buffer` (read by looks), `set_layer_bloom`; `Premultiplied` and `Max` blending; `quit()`.
+- Program cache: linked programs are saved with `glGetProgramBinary` in `~/.cache/zero_sprite_engine/shaders` and loaded on later runs (`ZSE_SHADER_CACHE=off` disables it).
+- Windows: GL loading, vsync and the profiler's memory and CPU readings are per platform (`gpu_windows.odin`, `profiler_windows.odin`); the profiler times the batch flush and offscreen work apart, since NVIDIA on Windows waits for the display there.
+- Profiler: `ZSE_PROFILE_SECONDS` runs leave out a 5 s warm-up (`ZSE_PROFILE_WARMUP`), and `ZSE_PROFILE_OVERLAY=off` hides the overlay. `benchmark.sh` sets the warm-up to 0, so the reports still cover whole runs as in the entries below. `ZSE_FIXED_DT` gives repeatable frames.
+- Parameter reads: a draw call of one instance now reads its parameters at constant indices (`u_p(i)` = `u_inst[3 + i]`, its record bound at the start of the block), which drivers keep in registers as they do uniforms. Indexing by the instance's `v_params` made every read a memory load: on the Intel Iris Xe of this laptop (where the desktop runs; the headless runs below use the NVIDIA GPU), Light Room ran at 44.1 ms per frame against 31.2 ms in the branch's own engine, which reads plain uniforms, `logo_look` taking 26.8 instead of 15.1 ms. Calls of several instances use a batched variant of the shader (`vfx.batched_source`), compiled the first time a look is drawn batched, by `precompile()`, or at startup from the shader manifest. On the Intel GPU Light Room now takes 29.5 ms per frame (`logo_look` 14.5 ms; the branch measured 31.2 and 33.9 ms in two runs).
+- Monitors: `fill_monitor` makes the window borderless over a chosen monitor, which raylib can't do on Wayland (it can't tell where the window is, so its borderless mode always took monitor 0); Light Room takes it from `ROOM_MONITOR` (a number or a name). Runs only at startup.
+- Editor: presets ported from the new demos (`cave_rock`, `cave_fog`, `nanobot`, `light_glow`), and the builtins `int_fbm`, `falloff` and `gate` for look scripts.
+- Checked by screenshots at a fixed time step: the two new demos are pixel-identical to the branch's own engine in five scenes, and Breakout, Galcon and tower defense (at 14 s, during the first wave) are identical to 7b0a174 (tower defense within 1 of 255 in a few pixels).
+
+| Demo | FPS | Frame ms (median / p99 / worst) | Hitches | GPU ms/frame | CPU | Startup ms | Shaders compiled |
+|---|---|---|---|---|---|---|---|
+| Breakout | 93.4 | 10.41 / 15.45 / 18.01 | 0 | 0.96 | 100% | 54 | 0 (36 from manifest in 31 ms, 36 used) |
+| Tower defense | 59.2 | 16.79 / 20.83 / 25.63 | 0 | 1.08 | 86% | 100 | 0 (42 from manifest in 65 ms, 42 used) |
+| Galcon | 59.1 | 16.73 / 20.91 / 46.63 | 1 | 0.84 | 90% | 28 | 0 (13 from manifest in 5 ms, 13 used) |
+| AlgoGame | 57.0 | 17.17 / 26.52 / 57.28 | 3 | 2.08 | 100% | 70 | 1 in one run (23 from manifest in 9 ms) |
+| Light Room | 41.1 | 23.76 / 32.49 / 57.49 | 2 | 2.77 | 100% | 222 | 0 (34 from manifest in 44 ms) |
+
+Most expensive looks (GPU ms/frame): Breakout: `wall_background_look` 0.56 ms, `brick_look` 0.39 ms; Tower defense: `enemy_look` 0.72 ms, `terrain_look` 0.08 ms; Galcon: `space_look` 0.82 ms, `asteroid_look` 0.02 ms; AlgoGame: `jelly_look` 0.66 ms, `fog_look` 0.21 ms; Light Room: `object_look` 0.80 ms, `room_look` 0.60 ms, `logo_look` 0.23 ms.
+
+Compared with 7b0a174, measured alternately in the same session, 7b0a174 first in two pairs and second in a third:
+
+- GPU time per frame is lower: Breakout 1.58 → 0.96 ms, tower defense 1.78 → 1.08 ms, Galcon 1.21 → 0.84 ms (in the reversed pair 1.03 → 0.94, 1.80 → 1.11 and 0.81 → 0.80 ms). Breakout's wall, the look that got 18% slower per pixel with instancing (96b76a2), is drawn alone, so it reads constant indices again: 0.86 → 0.56 ms. Before the parameter-read change, the first measurement of this merge gave 1.65, 2.14 and 2.07 ms, in an earlier session. Draw calls are unchanged.
+- Light Room's GPU time went from 5.06 ms (first measurement, earlier session) to 2.77 ms, mostly `logo_look` (1.06 → 0.23 ms), whose letters read about 50 vec4 parameters per pixel.
+- CPU time in `render` is 0.02–0.09 ms higher, also in the reversed pair, which this change doesn't explain per draw call (Galcon makes 3.5 calls a frame): Breakout 0.45 → 0.47 ms, tower defense 0.59 → 0.68 ms, Galcon 0.42 → 0.48 ms.
+- Startup is 10–30 ms longer, from loading the batched variants of looks drawn several to a call and of those passed to `precompile()`: Breakout 42 → 54 ms (36 shaders instead of 20), tower defense 70 → 100 ms (42 instead of 27), Galcon 17 → 28 ms. The manifests were refreshed by a warm-up run of each version first; without that, the shaders of the other version still in them are compiled for nothing until they age out (5 runs).
+- The program cache pays off on first runs: Light Room's 32 shaders took 3.5 s to compile on its first run and 45 ms to load on the next (startup 3638 → 209 ms), AlgoGame's 428 → 9 ms.
+
+Stress test, the average of two runs (7b0a174 in parentheses):
+
+| Stage | Entities | Setup ms | Frame avg ms | Frame p99 ms |
+|---|---|---|---|---|
+| 1. still variety | 400 | 12.9 | 21.7 (20.8) | 28.2 (24.8) |
+| 2. animated | 800 | 11.6 | 25.0 (24.5) | 31.2 (31.1) |
+| 3. movers and lights | 1,160 | 8.7 | 28.0 (26.9) | 34.5 (33.7) |
+| 4. spawn churn (+120 effects/s) | 1,160 | 0 | 27.9 (28.1) | 34.6 (35.4) |
+| 5. double load | 1,860 | 19.6 | 30.6 (30.5) | 37.0 (37.6) |
+
+Over the whole run: GPU time per frame 5.14 → 4.85 ms (reversed pair 5.25 → 4.90 ms), 598 → 600 draw calls per frame, `render` 3.08 → 3.26 ms of CPU (reversed pair 3.17 → 3.33 ms). The frame times are within noise of each other: in the reversed pair the stages measured 21.8 (21.4), 25.6 (25.9), 28.7 (28.3), 28.9 (29.1) and 31.6 (32.5) ms.
+
+## 7b0a174 — Group draws by look where quads don't overlap
 
 - Before the draw list is built, the scene is grouped: each entity joins the newest group drawing its shader with its blending, i.e. it may be drawn earlier than its place in the scene order, unless something it would then be drawn before overlaps its quad. Only the order of overlapping quads is visible, so mixed layers (and looks spread over several layers) now share draw calls. Overlaps are looked up in a 32×32 grid over the virtual screen.
 - Screenshots at a fixed time step are pixel-identical to 96b76a2 in Breakout, tower defense and Galcon; the stress test differs from it only as much as two runs of either version differ from each other.

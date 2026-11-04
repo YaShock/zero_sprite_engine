@@ -3,9 +3,10 @@ package engine
 import "base:intrinsics"
 import "core:math"
 import "core:math/rand"
+import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:time"
-import "vendor:glfw"
 import rl "vendor:raylib"
 
 Vector2 :: rl.Vector2
@@ -33,6 +34,10 @@ InitOptions :: struct {
 	// Don't remember compiled shaders across runs (see shader_manifest.odin); for tools that
 	// compile many throwaway shaders.
 	no_shader_manifest: bool,
+	// Constants in looks become literals in their shaders (see vfx.compile): faster shaders,
+	// but looks that differ only in a constant compile apart. For games whose looks don't
+	// differ that way between many entities.
+	bake_constants: bool,
 }
 
 @(private)
@@ -57,6 +62,10 @@ Engine :: struct {
 	match_window:  bool,
 	overlay:       proc(),
 	frame:         int, // frames rendered so far
+	px_factor:     f32, // target pixels per screen pixel: > 1 while drawing an out-of-focus layer's image
+	bake_constants: bool, // see InitOptions
+	quitting:      bool, // quit() was called: run() ends after this frame
+	fixed_dt:      f32, // ZSE_FIXED_DT: every frame advances this many seconds (repeatable frames for comparing builds); 0 = real time
 }
 
 // Frame timing gathered while VSync.Auto decides whether vsync holds the game back.
@@ -78,7 +87,9 @@ init_context :: proc(init: InitOptions) {
 		bg_color     = init.bg_color,
 		show_fps     = init.show_fps,
 		time_scale   = 1,
+		px_factor    = 1,
 		match_window = init.match_window,
+		bake_constants = init.bake_constants,
 	}
 	init_scene(init.num_layers)
 	init_lighting()
@@ -114,6 +125,44 @@ set_overlay :: proc(overlay: proc()) {
 // Scene time in seconds, as seen by shaders through time().
 time :: proc() -> f32 {
 	return f32(engine.time)
+}
+
+// Ends run() after the current frame, as closing the window does.
+quit :: proc() {
+	engine.quitting = true
+}
+
+// Makes the window cover a whole monitor without decorations (borderless windowed): the
+// monitor at `monitor` in raylib's list (rl.GetMonitorName etc.), or with -1 the one the
+// window is on. On Wayland, applications can't see or set where their window is, so raylib
+// takes "the one it's on" to be monitor 0: games should let the player choose
+// (find_monitor).
+fill_monitor :: proc(monitor := -1) {
+	if monitor < 0 || monitor >= int(rl.GetMonitorCount()) {
+		rl.ToggleBorderlessWindowed()
+		return
+	}
+	if fill_monitor_wayland(monitor) {
+		return
+	}
+	// Elsewhere raylib finds the monitor from the window's position
+	rl.SetWindowMonitor(i32(monitor))
+	rl.ToggleBorderlessWindowed()
+}
+
+// The index of a monitor for fill_monitor, from its number in raylib's list or its name
+// ("HDMI-A-1"); -1 if there is none such.
+find_monitor :: proc(number_or_name: string) -> int {
+	count := int(rl.GetMonitorCount())
+	if i, ok := strconv.parse_int(number_or_name); ok {
+		return i if i >= 0 && i < count else -1
+	}
+	for i in 0 ..< count {
+		if string(rl.GetMonitorName(i32(i))) == number_or_name {
+			return i
+		}
+	}
+	return -1
 }
 
 // Scales how fast scene time (shader animation, lifetimes) advances; 0 freezes the scene.
@@ -158,7 +207,7 @@ set_vsync :: proc(mode: VSync) {
 
 @(private)
 apply_vsync :: proc(on: bool) {
-	glfw.SwapInterval(1 if on else 0)
+	set_swap_interval(on)
 	engine.vsync_on = on
 }
 
@@ -232,10 +281,13 @@ run :: proc(on_update: proc(delta_time: f32)) {
 	context.allocator = counting_allocator(&profiler.heap)
 	context.temp_allocator = counting_allocator(&profiler.temp)
 
-	for !rl.WindowShouldClose() && !profiler_should_quit() {
+	if s, ok := strconv.parse_f32(os.get_env("ZSE_FIXED_DT", context.temp_allocator)); ok && s > 0 {
+		engine.fixed_dt = s
+	}
+	for !rl.WindowShouldClose() && !engine.quitting && !profiler_should_quit() {
 		engine.frame += 1
 		profiler_begin_frame()
-		dt := rl.GetFrameTime() * engine.time_scale
+		dt := (engine.fixed_dt if engine.fixed_dt > 0 else rl.GetFrameTime()) * engine.time_scale
 		engine.time += f64(dt)
 		update_viewport()
 
@@ -255,7 +307,11 @@ run :: proc(on_update: proc(delta_time: f32)) {
 		}
 
 		profile_begin("render")
+		// The frame's first GPU work: where some drivers wait for the display (see FLUSH_ZONE)
+		profile_begin(OFFSCREEN_ZONE)
 		refresh_caches()
+		render_layer_images(camera)
+		profile_end()
 		rl.BeginDrawing()
 		rl.ClearBackground(engine.bg_color)
 		rl.BeginScissorMode(
@@ -265,12 +321,17 @@ run :: proc(on_update: proc(delta_time: f32)) {
 			i32(engine.height * vp.scale),
 		)
 		rl.BeginMode2D(camera)
-		render_entities()
+		render_entities(camera)
 		if engine.overlay != nil {
 			engine.overlay()
 		}
+		// Some drivers (e.g. NVIDIA on Windows) return from the buffer swap at once and block
+		// here instead, where raylib hands over its batched drawing, until the display is
+		// ready for another frame; that wait is timed apart from the work.
+		profile_begin(FLUSH_ZONE)
 		rl.EndMode2D()
 		rl.EndScissorMode()
+		profile_end()
 		if engine.show_fps {
 			rl.DrawFPS(10, 10)
 		}

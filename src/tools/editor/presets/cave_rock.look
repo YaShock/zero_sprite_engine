@@ -1,0 +1,56 @@
+// Cave rock, from AlgoGame: fine rubble of pebbles and pores in sandy rock, fading to almost
+// black toward the top. Each pore and pebble is one irregular ellipse per cell of a jittered
+// grid, sized, squashed and turned by the cell's hash. In the game the rock's edge is a curve
+// the game moves every frame; here it is a wavy line.
+size 480 270
+param unit = 36 in [12, 72]           // pixels per world unit
+param scroll = 0 in [0, 40] animate 20 // the texture moves with the cave
+param edge = 60 in [-100, 120]        // the rock's lower edge, from the middle
+
+let p = coord
+let tp = (p + vec2(scroll * unit, 0)) / unit   // world units, moving with the cave
+let wavy = edge + sin((p.x + scroll * unit) * 0.011) * 22 + (noise(vec2((p.x + scroll * unit) * 0.02, 0)) - 0.5) * 30
+let inside = fill(p.y - wavy)
+
+// Pores: small dark fragments with a faint lit lower lip
+let pore_id = cell_id(tp, 0.44)
+let pore_rx = 0.0125 + pow(hash(pore_id + 11), 3) * 0.04375
+let pore_ry = pore_rx * (0.6 + hash(pore_id + 12.3) * 0.4)
+let pore_at = tile(tp, 0.44) - (vec2(hash(pore_id + 13.9), hash(pore_id + 15.1)) - 0.5) * 0.3275
+let pore_turn = (hash(pore_id + 17.7) - 0.5) * 3.14
+let pore_local = rotate(pore_at, pore_turn)
+let pore_rim_local = rotate(pore_at - [0, 0.01875], pore_turn)
+let pore = (length(pore_local / vec2(pore_rx, pore_ry)) - 0.85 - noise(pore_local * 18.94 + pore_id * 3.7) * 0.3) * min(pore_rx, pore_ry)
+let pore_rim = (length(pore_rim_local / vec2(pore_rx, pore_ry)) - 0.85 - noise(pore_rim_local * 18.94 + pore_id * 3.7) * 0.3) * min(pore_rx, pore_ry)
+
+// Pebbles: larger, in grays a little above the rock's, with a drop shadow and a soft shine;
+// a quarter of the cells have none, so they don't look ruled
+let id = cell_id(tp, 0.62)
+let rx = 0.03125 + pow(hash(id + 23), 3) * 0.09375
+let ry = rx * (0.55 + hash(id + 24.3) * 0.35)
+let at = tile(tp, 0.62) - (vec2(hash(id + 25.9), hash(id + 27.1)) - 0.5) * 0.37
+let turn = (hash(id + 29.7) - 0.5) * 1.2
+let local = rotate(at, turn)
+let shadow_local = rotate(at - [0.01875, 0.028125], turn)
+let shine_local = rotate(at - [-0.04, -0.03], turn)
+let pebble = (length(local / vec2(rx, ry)) - 0.85 - noise(local * 13.44 + id * 3.7) * 0.3) * min(rx, ry)
+let shadow = (length(shadow_local / vec2(rx, ry)) - 0.85 - noise(shadow_local * 13.44 + id * 3.7) * 0.3) * min(rx, ry)
+let shine = (length(shine_local / vec2(rx, ry)) - (0.85 + noise(shine_local * 13.44 + id * 3.7) * 0.3) * 0.45) * min(rx, ry)
+let gray = mix(#1c1a17, #2a2825, hash(id + 8.8))
+let present = step(0.25, hash(id + 3.3))
+
+// Sand speckle, one grain per pixel at most, and the fade toward the top
+let grain = hash(floor(tp * unit))
+let fade = pow(saturate(1 - uv.y / 0.32), 2.2) * 0.96
+
+let rock = stack(
+    #16161a,
+    mask(#82879621, fill(pore_rim * unit)),
+    mask(#07080b, fill(pore * unit)),
+    mask(#00000080, present * fill(shadow * unit)),
+    mask(gray, present * fill(pebble * unit)),
+    mask(#fff0dc17, present * fill(shine * unit)),
+    mask(#ffebd20f, step(grain, 0.02)),
+    mask(#00000040, step(0.976, grain)),
+    mask(#030306, fade))
+stack(#07080d, mask(rock, inside))

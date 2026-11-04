@@ -63,10 +63,18 @@ begin_batching :: proc(b: ^Batcher) {
 batch_entity :: proc(b: ^Batcher, e: ^Entity) {
 	shader := -1
 	lo, hi: Vector2
-	switch d in e.drawable {
+	switch &d in e.drawable {
 	case Material:
 		if !e.cache.enabled || e.cache.texture.id == 0 {
 			shader = d.shader
+		}
+		if shader_cache.entries[d.shader].program.instances[1] > 0 {
+			// An instanced look draws its records' quads, wherever they are.
+			ok: bool
+			if lo, hi, ok = instances_bounds(&d, e.pos, e.rotation); !ok {
+				return // draws nothing
+			}
+			break
 		}
 		// The rotated quad's bounding box.
 		half := e.size / 2 + e.pad
@@ -152,7 +160,7 @@ cell_range :: proc(lo, hi: Vector2) -> (x0, y0, x1, y1: int) {
 // Adds the groups' draws to the list, in group order.
 @(private)
 emit_batches :: proc(b: ^Batcher, list: ^DrawList) {
-	px := 1 / engine.viewport.scale
+	px := engine.px_factor / engine.viewport.scale
 	for g in b.groups {
 		if g.shader < 0 {
 			append(&list.steps, RaylibDraw{b.members[g.head].id})

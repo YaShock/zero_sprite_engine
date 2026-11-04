@@ -1,0 +1,18 @@
+// Cave fog, from AlgoGame (its background) and Light Room (the sea beyond the cave):
+// domain-warped fractal noise with integer hashing, tinted between two hues and thinned to
+// its upper range, over the dark water. The games draw it small and stretch it, out of focus.
+size 480 270
+param unit = 36 in [8, 72]            // pixels per world unit
+param scroll = 0 in [0, 60] animate 30 // how far the cave has been flown, in world units
+param warp = 1.2 in [0, 3]
+param intensity = 0.6 in [0, 1]
+param seed_lo = 4660 in [0, 65535]
+
+let w = (coord / unit + vec2(scroll * 0.25, 0)) / 7  // noise cells of 7 world units, in parallax
+let t = time / 8
+let wx = int_fbm(vec2(w.x, w.y + t * 0.5), 0, seed_lo, 2, 11) * 2 - 1
+let wy = int_fbm(vec2(w.x + t * 0.3, w.y), 0, seed_lo, 2, 12) * 2 - 1
+let v = int_fbm(vec2(w.x + wx * warp + t * 0.2, w.y + wy * warp), 0, seed_lo, 3, 13)
+let d = saturate((v - 0.35) / 0.5)
+let alpha = min(d * d * (3 - d * 2) * intensity, 1)
+mix(#07080d, mix(#1d3a5c, #3b1f5a, (wx + 1) / 2), alpha)

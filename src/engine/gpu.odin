@@ -1,39 +1,144 @@
 package engine
 
 // Direct OpenGL access for what raylib doesn't expose: instanced draws of looks, GPU timer
-// queries for the profiler and shader compile logs for reporting errors in generated GLSL.
+// queries for the profiler, shader compile logs for reporting errors in generated GLSL, float
+// render targets and the disk cache of compiled programs. The rlgl symbols and the GL loader
+// differ per platform (gpu_posix.odin, gpu_windows.odin).
 
+import "core:fmt"
+import "core:hash"
+import "core:os"
 import "core:strings"
 import "vfx"
 import gl "vendor:OpenGL"
 import rl "vendor:raylib"
-import "vendor:glfw"
 
-// vendor:raylib/rlgl links its own bundled static library, which distro/Nix builds of raylib
-// don't ship; the few rlgl symbols needed here are exported by the system raylib anyway.
-foreign import raylib_lib "system:raylib"
-
-@(private, default_calling_convention = "c")
-foreign raylib_lib {
-	rlGetShaderIdDefault :: proc() -> u32 ---
-	rlDrawRenderBatchActive :: proc() ---
-	rlEnableColorBlend :: proc() ---
-	rlDisableColorBlend :: proc() ---
-	rlGetMatrixModelview :: proc() -> rl.Matrix ---
-	rlGetMatrixProjection :: proc() -> rl.Matrix ---
-}
-
-// raylib creates its window through the system GLFW, so GLFW's loader sees its context.
 @(private)
 init_gpu :: proc() {
-	gl.load_up_to(3, 3, proc(p: rawptr, name: cstring) {
-		(^rawptr)(p)^ = glfw.GetProcAddress(name)
-	})
+	load_gl()
 	init_instances()
+	init_program_cache()
 }
 
 gpu_renderer :: proc() -> string {
 	return string(gl.GetString(gl.RENDERER))
+}
+
+// Compiled shader programs kept on disk (glGetProgramBinary), so that a look compiled once
+// loads at once next time, in any build of any game: the file name is a hash of the
+// program's sources and the GPU and driver. A driver that rejects a saved program (after an
+// update) gets it compiled and saved again. Off with ZSE_SHADER_CACHE=off or where the driver
+// has no program binaries.
+@(private)
+ProgramCache :: struct {
+	dir:      string, // "" = off
+	identity: string, // GPU and driver
+}
+
+@(private)
+program_cache: ProgramCache
+
+@(private)
+init_program_cache :: proc() {
+	if os.get_env("ZSE_SHADER_CACHE", context.temp_allocator) == "off" {
+		return
+	}
+	formats: i32
+	gl.GetIntegerv(gl.NUM_PROGRAM_BINARY_FORMATS, &formats)
+	if formats <= 0 || gl.impl_ProgramBinary == nil || gl.impl_GetProgramBinary == nil {
+		return
+	}
+	base := os.get_env("LOCALAPPDATA", context.temp_allocator)
+	if base == "" {
+		base = os.get_env("XDG_CACHE_HOME", context.temp_allocator)
+	}
+	if base == "" {
+		base = fmt.tprintf("%s/.cache", os.get_env("HOME", context.temp_allocator))
+	}
+	dir := fmt.aprintf("%s/zero_sprite_engine/shaders", base)
+	if os.make_directory_all(dir) != nil && !os.exists(dir) {
+		delete(dir)
+		return
+	}
+	program_cache.dir = dir
+	program_cache.identity = fmt.aprintf("%s|%s", gl.GetString(gl.RENDERER), gl.GetString(gl.VERSION))
+}
+
+// Where a program of these sources is saved
+@(private)
+program_cache_path :: proc(vertex, fragment: string) -> string {
+	key := strings.concatenate({program_cache.identity, "\x00", vertex, "\x00", fragment}, context.temp_allocator)
+	a, b := hash.fnv64a(transmute([]u8)key), hash.fnv64a(transmute([]u8)key, 0x84222325cbf29ce4)
+	return fmt.tprintf("%s/%016x%016x.bin", program_cache.dir, a, b)
+}
+
+// The saved program of these sources, linked; 0 if there is none or the driver refuses it
+@(private)
+load_cached_program :: proc(vertex, fragment: string) -> u32 {
+	if program_cache.dir == "" {
+		return 0
+	}
+	data, err := os.read_entire_file(program_cache_path(vertex, fragment), context.temp_allocator)
+	if err != nil || len(data) <= 4 {
+		return 0
+	}
+	format := (^u32le)(raw_data(data))^ // the file: binary format, then the binary
+	id := gl.CreateProgram()
+	gl.ProgramBinary(id, u32(format), &data[4], i32(len(data) - 4))
+	linked: i32
+	gl.GetProgramiv(id, gl.LINK_STATUS, &linked)
+	if linked == 0 {
+		gl.DeleteProgram(id)
+		return 0
+	}
+	return id
+}
+
+// Saves a linked program for load_cached_program
+@(private)
+save_program :: proc(id: u32, vertex, fragment: string) {
+	if program_cache.dir == "" {
+		return
+	}
+	length: i32
+	gl.GetProgramiv(id, gl.PROGRAM_BINARY_LENGTH, &length)
+	if length <= 0 {
+		return
+	}
+	data := make([]u8, 4 + int(length), context.temp_allocator)
+	written: i32
+	format: u32
+	gl.GetProgramBinary(id, length, &written, &format, &data[4])
+	if written <= 0 {
+		return
+	}
+	(^u32le)(raw_data(data))^ = u32le(format)
+	_ = os.write_entire_file(program_cache_path(vertex, fragment), data[:4 + int(written)])
+}
+
+// A render texture with half-float color (raylib's LoadRenderTexture makes 8-bit ones): light
+// adds up without rounding to 1/255 at every draw, and values may be negative or above 1
+// (layer buffers hold e.g. a field and its slope). No depth buffer; filtered bilinearly.
+// raylib draws into it and unloads it like its own.
+@(private)
+load_float_target :: proc(w, h: i32) -> rl.RenderTexture2D {
+	t: rl.RenderTexture2D
+	tex: u32
+	gl.GenTextures(1, &tex)
+	gl.BindTexture(gl.TEXTURE_2D, tex)
+	gl.TexImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.FLOAT, nil)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+	gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+	gl.BindTexture(gl.TEXTURE_2D, 0)
+	gl.GenFramebuffers(1, &t.id)
+	gl.BindFramebuffer(gl.FRAMEBUFFER, t.id)
+	gl.FramebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0)
+	assert(gl.CheckFramebufferStatus(gl.FRAMEBUFFER) == gl.FRAMEBUFFER_COMPLETE, "float render target incomplete")
+	gl.BindFramebuffer(gl.FRAMEBUFFER, 0)
+	t.texture = {id = tex, width = w, height = h, mipmaps = 1, format = .UNCOMPRESSED_R16G16B16A16}
+	return t
 }
 
 // Compiles a fragment shader on its own to get the driver's verdict and error log; raylib
@@ -68,12 +173,20 @@ check_glsl_library :: proc() -> (ok: bool, log: string) {
 	if ok, log = check_shader(gl.VERTEX_SHADER, vfx.VERTEX_SHADER); !ok {
 		return
 	}
-	return check_fragment_shader(vfx.library_test_source())
+	if ok, log = check_shader(gl.VERTEX_SHADER, vfx.VERTEX_INSTANCED_SHADER); !ok {
+		return
+	}
+	if ok, log = check_fragment_shader(vfx.library_test_source()); !ok {
+		return
+	}
+	return check_fragment_shader(vfx.batched_source(vfx.library_test_source(), context.temp_allocator))
 }
 
 // Instance records of look draws (see vfx/glsl/vertex.glsl), in a uniform buffer: each draw
-// call binds a 64 KB window of it as its shader's `Instances` block, so a look reads its
-// parameters as cheaply as uniforms while a warp stays within one instance. All records of
+// call binds a 64 KB window of it as its shader's `Instances` block, starting at its first
+// record: a call of one instance reads its parameters at constant indices, as cheaply as
+// uniforms, and a batched call (the shader's batched variant) at its instance's offset,
+// which costs some drivers a memory load per parameter (see vfx.batched_source). All records of
 // a draw list are uploaded at once, into fresh storage (draws already issued keep the old
 // one): writing the buffer once per draw call either stalled on it or, when mapped, made the
 // driver keep it in system memory, where large quads read their parameters slowly.
@@ -117,33 +230,57 @@ upload_instances :: proc(records: [][4]f32) {
 	gl.BindBuffer(gl.UNIFORM_BUFFER, 0)
 }
 
-// Draws `count` instances of a look shader whose records start at `first` in the records
-// last uploaded, with the uniforms that every look reads set to the values given. Anything
-// raylib has batched must have been flushed before.
+// Issues a draw call of a look shader (see DrawCall) from the records last uploaded, with
+// the uniforms and textures every look reads. Anything raylib has batched must have been
+// flushed before.
 @(private)
-draw_instances :: proc(entry: ^ShaderEntry, first, count: int, px: f32) {
-	gl.BindBufferRange(gl.UNIFORM_BUFFER, INSTANCE_BINDING, instances.buffer, first * size_of([4]f32), INSTANCE_VEC4S * size_of([4]f32))
-	gl.UseProgram(entry.shader.id)
+draw_instances :: proc(entry: ^ShaderEntry, program: ^LookProgram, call: DrawCall) {
+	gl.BindBufferRange(gl.UNIFORM_BUFFER, INSTANCE_BINDING, instances.buffer, call.first * size_of([4]f32), INSTANCE_VEC4S * size_of([4]f32))
+	gl.UseProgram(program.shader.id)
 	modelview := rl.MatrixToFloatV(rlGetMatrixModelview())
 	projection := rl.MatrixToFloatV(rlGetMatrixProjection())
-	gl.UniformMatrix4fv(entry.loc_modelview, 1, false, &modelview[0])
-	gl.UniformMatrix4fv(entry.loc_projection, 1, false, &projection[0])
-	gl.Uniform1f(entry.loc_time, f32(engine.time))
-	gl.Uniform1f(entry.loc_px, px)
-	// Uniforms persist in the program, so the lights are uploaded once per frame per shader.
-	if entry.loc_light_count >= 0 && entry.lights_frame != engine.frame {
-		entry.lights_frame = engine.frame
+	gl.UniformMatrix4fv(program.loc_modelview, 1, false, &modelview[0])
+	gl.UniformMatrix4fv(program.loc_projection, 1, false, &projection[0])
+	gl.Uniform1f(program.loc_time, f32(engine.time))
+	gl.Uniform1f(program.loc_px, call.px)
+	// Uniforms persist in the program, so the lights are uploaded once per frame per program.
+	if program.loc_light_count >= 0 && program.lights_frame != engine.frame {
+		program.lights_frame = engine.frame
 		l := light_uniforms()
-		gl.Uniform1i(entry.loc_light_count, l.count)
-		gl.Uniform4fv(entry.loc_light_pos, MAX_LIGHTS, &l.pos[0][0])
-		gl.Uniform4fv(entry.loc_light_color, MAX_LIGHTS, &l.color[0][0])
-		gl.Uniform3fv(entry.loc_ambient, 1, &l.ambient[0])
+		gl.Uniform1i(program.loc_light_count, l.count)
+		gl.Uniform4fv(program.loc_light_pos, MAX_LIGHTS, &l.pos[0][0])
+		gl.Uniform4fv(program.loc_light_color, MAX_LIGHTS, &l.color[0][0])
+		gl.Uniform3fv(program.loc_ambient, 1, &l.ambient[0])
 	}
+	// The samplers' units are set once per program (make_look_program)
+	if call.texture != 0 {
+		gl.ActiveTexture(gl.TEXTURE0 + DATA_UNIT)
+		gl.BindTexture(gl.TEXTURE_2D, call.texture)
+	}
+	if layer := entry.program.layer; layer >= 0 {
+		// Buffer layers, drawn before the frame (render_layer_images)
+		gl.ActiveTexture(gl.TEXTURE0 + LAYER_UNIT)
+		gl.BindTexture(gl.TEXTURE_2D, layer_texture(layer).id)
+		gl.Uniform2f(program.loc_screen, engine.width, engine.height)
+	}
+	if layer2 := entry.program.layer2; layer2 >= 0 {
+		gl.ActiveTexture(gl.TEXTURE0 + LAYER2_UNIT)
+		gl.BindTexture(gl.TEXTURE_2D, layer_texture(layer2).id)
+	}
+	gl.ActiveTexture(gl.TEXTURE0)
 	gl.BindVertexArray(instances.vao)
-	gl.DrawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, i32(count))
+	gl.DrawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, i32(call.count))
 	gl.BindVertexArray(0)
 	gl.UseProgram(0)
 }
+
+// Texture units of the textures looks read (unit 0 stays raylib's)
+@(private)
+DATA_UNIT :: 1
+@(private)
+LAYER_UNIT :: 2
+@(private)
+LAYER2_UNIT :: 3
 
 // GPU timestamps: one pool of queries per frame in flight, read back a few frames later so
 // the CPU never waits on the GPU.

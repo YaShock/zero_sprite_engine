@@ -57,6 +57,20 @@ This project aims to make a 2D engine with **purely** procedurally generated con
 
 ![TowerDefense](screenshots/galcon.png)
 
+- AlgoGame (`src/demos/algo_game`)
+    - Underwater cave flyer: hold Space, W, Up or a mouse button to thrust; Escape opens the quit menu
+    - Cave, corals, sea fans, tentacles, jellyfish and goo with its own physics, lit by glowing spores
+    - `ALGO_FULLSCREEN=on` for a borderless full-screen window, `ALGO_SEED=N` for a given cave
+
+![AlgoGame](screenshots/algo-game.png)
+
+- Light Room (`src/demos/light_room`)
+    - 3D tech demo on the 2D engine: each object's look casts a ray through its pixels (sphere-traced solids, capsule letters and cables), lit by point lights with soft shadows, ambient occlusion, haze and bloom
+    - Space starts scene 1, then the flood, then the underwater scene 2, and finally exits
+    - Full screen by default (`ROOM_MONITOR=1` or `ROOM_MONITOR=HDMI-A-1` picks the screen; on Wayland it is otherwise the first one); `ROOM_FULLSCREEN=off` runs it in a 1280x720 window, `ROOM_PART=deep` jumps to the underwater scene
+
+![LightRoom](screenshots/light-room.png)
+
 - "Flappy Bird" clone
     - Sky generation
     - Bird generation
@@ -73,12 +87,13 @@ Engine enhancements proposed so far, roughly in order of value for effort. Each 
     - Noise detail by screen size: fade out fbm layers finer than a pixel, so small or zoomed-out looks get cheaper and stop shimmering
     - A `cached()` node that renders only the still part of a look into a texture (e.g. a brick's surface, while its hit flash and cracks stay live)
     - A cheaper `lit` option using screen-space derivatives (one height evaluation instead of four)
-    - Render expensive layers such as backgrounds at reduced resolution
+    - Render expensive layers such as backgrounds at reduced resolution: `set_layer_resolution` does this for out-of-focus layers; try it on still backgrounds such as Breakout's wall
 - Draw calls
     - Let additive looks pass over each other when grouping draws (additive blending commutes, up to rounding), so overlapping effects batch too
-    - Find out why large heavy looks cost more per pixel since instancing (Breakout's wall +18%): reading the parameters from uniforms instead of the instance block recovers only about 4%, so most of it lies elsewhere (e.g. size, rotation and age as flat varyings, or the shared vertex shader)
+    - Batched draw calls still read parameters at a per-instance offset, a memory load per read on Intel: for heavy looks drawn many at a time, try copying the record into registers once (e.g. subgroup operations, where every pixel of a warp belongs to one instance)
+    - Find the 0.02–0.09 ms of `render` CPU time per frame that the per-call choice of shader variant added (see `CHANGELOG.md`)
 - Particles
-    - CPU-simulated particles (velocity, drag, gravity, lifetime, collisions) drawn with instancing
+    - CPU-simulated particles (velocity, drag, gravity, lifetime, collisions), drawn as an instanced look (`vfx.instances`, as AlgoGame's spores)
     - GPU particle simulation with transform feedback, colliding with any look's distance field
 - Lighting
     - Tower defense: fire towers and lightning orbs as scene lights on the golems
@@ -107,3 +122,4 @@ Engine enhancements proposed so far, roughly in order of value for effort. Each 
     - A tree view of a look in the editor, with the profiler's cost per node
 - Platform
     - Move to a modern graphics API only once a feature needs compute shaders
+    - The engine also builds on Windows (`gpu_windows.odin`, `profiler_windows.odin`), but `benchmark.sh` and the headless runs are Linux-only

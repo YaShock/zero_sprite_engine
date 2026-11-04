@@ -15,6 +15,7 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 import rl "vendor:raylib"
+import "vfx"
 
 SHADER_MANIFEST_DIR :: ".shader-cache"
 MANIFEST_MAX_UNUSED_RUNS :: 5
@@ -120,6 +121,9 @@ write_shader_manifest :: proc() {
 	}
 	for e in shader_cache.entries {
 		record(&sb, 0, e.program.source, e.label)
+		if e.batched.shader.id != 0 {
+			record(&sb, 0, vfx.batched_source(e.program.source, context.temp_allocator), e.label)
+		}
 	}
 	for w in manifest.warm {
 		if !w.taken && w.unused_runs < MANIFEST_MAX_UNUSED_RUNS {

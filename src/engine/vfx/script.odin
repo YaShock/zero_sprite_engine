@@ -887,15 +887,20 @@ need :: proc(c: ^Call, v: Value, what: string, types: bit_set[Type]) -> bool {
 // Arguments that become compile-time integers (octaves, grid sizes, counts) must be constant.
 @(private)
 need_int :: proc(c: ^Call, v: Value, what: string, default: int) -> (int, bool) {
+	return need_whole(c, v, what, default, 1, 64)
+}
+
+@(private)
+need_whole :: proc(c: ^Call, v: Value, what: string, default, lo, hi: int) -> (int, bool) {
 	if v == nil {
 		return default, true
 	}
 	n, is_number := v.(f32)
-	if !is_number || n < 1 || n > 64 {
-		fail(c.p, c.at, fmt.tprintf("%s: '%s' must be a constant whole number between 1 and 64", c.name, what))
+	if !is_number || n < f32(lo) || n > f32(hi) || n != math.floor(n) {
+		fail(c.p, c.at, fmt.tprintf("%s: '%s' must be a constant whole number between %d and %d", c.name, what, lo, hi))
 		return 0, false
 	}
-	return int(n + 0.5), true
+	return int(n), true
 }
 
 @(private)
@@ -1061,6 +1066,14 @@ BUILTINS := [?]Builtin {
 			need(c, a[0], "p", V2) or_return
 			return voronoi_edge(to_expr(a[0])), true
 		}},
+	{"int_fbm", {"p", "seed_hi", "seed_lo", "octaves", "offset"}, 3, false, "fractal noise with integer hashing (AlgoGame's fog); offset varies the seed", proc(c: ^Call, a: []Value) -> (v: Value, ok: bool) {
+			need(c, a[0], "p", V2) or_return
+			need(c, a[1], "seed_hi", NUM) or_return
+			need(c, a[2], "seed_lo", NUM) or_return
+			octaves := need_int(c, a[3], "octaves", 3) or_return
+			offset := need_whole(c, a[4], "offset", 0, 0, 1000) or_return
+			return int_fbm(to_expr(a[0]), to_expr(a[1]), to_expr(a[2]), octaves, offset), true
+		}},
 	// Shapes
 	{"sd_box", {"p", "half_size", "radius"}, 2, false, "rounded box distance", proc(c: ^Call, a: []Value) -> (v: Value, ok: bool) {
 			need(c, a[0], "p", V2) or_return
@@ -1102,6 +1115,16 @@ BUILTINS := [?]Builtin {
 			need(c, a[0], "d", NUM) or_return
 			need(c, a[1], "radius", NUM) or_return
 			return glow(to_expr(a[0]), to_expr(a[1])), true
+		}},
+	{"falloff", {"r", "kind"}, 1, false, "round light from 1 at r = 0 to 0 at r = 1; kind 0 soft, 1 dot, 2 quadratic", proc(c: ^Call, a: []Value) -> (v: Value, ok: bool) {
+			need(c, a[0], "r", NUM) or_return
+			kind := need_whole(c, a[1], "kind", 0, 0, len(GlowFalloff) - 1) or_return
+			return falloff(to_expr(a[0]), GlowFalloff(kind)), true
+		}},
+	{"gate", {"condition", "value"}, 2, false, "value where condition > 0, else 0 (value is computed only there)", proc(c: ^Call, a: []Value) -> (v: Value, ok: bool) {
+			need(c, a[0], "condition", NUM) or_return
+			need(c, a[1], "value", ANY) or_return
+			return gate(to_expr(a[0]), to_expr(a[1])), true
 		}},
 	// Color
 	{"palette", {"t", "a", "b", "c", "d"}, 5, false, "cosine palette a + b*cos(2pi(c*t + d))", proc(c: ^Call, a: []Value) -> (v: Value, ok: bool) {

@@ -5,7 +5,9 @@
 #
 #     src/tools/benchmark.sh before
 #
-# See CHANGELOG.md for how the results are compared and recorded.
+# See CHANGELOG.md for how the results are compared and recorded. The profiler's warm-up is
+# turned off (ZSE_PROFILE_WARMUP=0), so that the reports cover the whole run, startup
+# included, as in every entry so far.
 set -u
 label=${1:?usage: src/tools/benchmark.sh <label>}
 out="profiles/bench/$label"
@@ -15,11 +17,11 @@ newest_report() {
 	find profiles -maxdepth 1 -name '*.txt' -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2
 }
 
-for demo in breakout tower_defense galcon stress; do
+for demo in breakout tower_defense galcon stress algo_game light_room; do
 	# Xvfb is sometimes not ready in time; raylib then exits at once without a report.
 	for attempt in 1 2 3; do
 		before=$(newest_report)
-		ZSE_PROFILE_SECONDS=20 env -u WAYLAND_DISPLAY nix shell nixpkgs#xvfb-run -c \
+		ZSE_PROFILE_SECONDS=20 ZSE_PROFILE_WARMUP=0 env -u WAYLAND_DISPLAY nix shell nixpkgs#xvfb-run -c \
 			xvfb-run -a -s '-screen 0 1600x900x24' odin run "src/demos/$demo" >"$out/$demo.log" 2>/dev/null
 		report=$(newest_report)
 		if [ -n "$report" ] && [ "$report" != "$before" ]; then

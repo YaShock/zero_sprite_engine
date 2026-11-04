@@ -1,0 +1,11 @@
+// Lamp glow, from Light Room: a soft halo round a white-hot core, in the light's color,
+// added over the scene (the game draws it with additive blending; its halo is fainter where
+// haze in the air already shows the light).
+size 160 160
+param glow = #ffc47a
+param halo = 0.55 in [0, 1]
+param vis = 1 in [0, 1] animate 3 pingpong   // how much of the light is in view
+
+let r = length(coord) / (size.x * 0.5)
+let core = 1 - smoothstep(0.08, 0.16, r)
+mask(mix(glow, #ffffff, core), (falloff(r, 0) * halo + core) * vis)
